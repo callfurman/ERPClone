@@ -107,7 +107,7 @@
 
 ### 3.3 BPMN схема as-is
 
-*[Схема as-is прилагается отдельным файлом]*
+![Схема BPMN As-Is](images/BPMN_before.png)
 
 ---
 
@@ -201,7 +201,7 @@
 
 ### 4.3 BPMN схема to-be
 
-*[Схема to-be прилагается отдельным файлом]*
+![Схема BPMN As-Is](images/BPMN_after.png)
 
 ---
 
