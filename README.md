@@ -107,7 +107,7 @@
 
 ### 3.3 BPMN схема as-is
 
-![Схема BPMN As-Is](images/BPMN_before.png)
+![Схема BPMN As-Is](ERPClone/image/BPMN_before.png)
 
 ---
 
@@ -201,7 +201,7 @@
 
 ### 4.3 BPMN схема to-be
 
-![Схема BPMN As-Is](images/BPMN_after.png)
+![Схема BPMN As-Is](ERPClone/image/BPMN_after.png)
 
 ---
 
