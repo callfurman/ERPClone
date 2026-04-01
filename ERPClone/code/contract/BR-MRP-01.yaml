@@ -1,13 +1,1061 @@
 openapi: '3.0.3'
 info:
-  title: Контракты для MRP BR-MRP-01
+  title: MRP API — BR-MRP-01
   version: '1.0'
-  description: Контракты для доступа к MRP 
+  description: API для расчёта потребности в сырье на основе производственных планов
+  contact:
+    name: MRP API Support
+    email: api-mrp@busines.ru
+
 servers:
   - url: https://api.mrp.ru/v1
+    description: Production
+ 
+
+tags:
+  - name: Планы
+    description: Управление производственными планами
+  - name: Расчёты
+    description: Асинхронные операции расчёта потребности
+
 paths:
-  /test:
+  /plans:
     get:
+      summary: Получить список планов
+      tags: [Планы]
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [month, quarter, year]
+            default: month
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
       responses:
         '200':
-          description: OK
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Plan'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+                  links:
+                    $ref: '#/components/schemas/HateoasLinks'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security: [{bearerAuth: []}]
+
+    post:
+      summary: Создать производственный план
+      tags: [Планы]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Уникальный ключ для предотвращения дублирования запросов
+          schema:
+            type: string
+            format: uuid
+          example: '550e8400-e29b-41d4-a716-446655440000'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePlanRequest'
+      responses:
+        '201':
+          description: План создан
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Plan'
+                  - properties:
+                      links:
+                        $ref: '#/components/schemas/HateoasLinks'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Conflict — план за этот период уже существует
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Unprocessable Entity — ключ идемпотентности уже использован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security: [{bearerAuth: []}]
+
+  /plans/{planId}:
+    get:
+      summary: Получить план по ID
+      tags: [Планы]
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Plan'
+                  - properties:
+                      links:
+                        $ref: '#/components/schemas/HateoasLinks'
+          headers:
+            ETag:
+              description: Версия ресурса для условных запросов
+              schema:
+                type: string
+              example: 'v1-abc123'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security: [{bearerAuth: []}]
+
+    delete:
+      summary: Удалить план
+      tags: [Планы]
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag версии ресурса для защиты от конкурентного изменения
+          schema:
+            type: string
+          example: 'v1-abc123'
+      responses:
+        '200':
+          description: Удалён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict — план в расчёте
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '412':
+          description: Precondition Failed — ETag не совпадает
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security: [{bearerAuth: []}]
+
+  /plans/{planId}/product/{productId}:
+    patch:
+      summary: Добавить/обновить позицию в плане
+      description: Добавляет товар в план или обновляет количество существующей позиции
+      tags: [Планы]
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        # ✅ ИСПРАВЛЕНО: добавлен If-Match для PATCH
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag версии ресурса для защиты от конкурентного изменения
+          schema:
+            type: string
+          example: 'v1-abc123'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plannedQuantity]
+              properties:
+                plannedQuantity:
+                  type: integer
+                  minimum: 1
+                  maximum: 999999999
+                  description: Плановое количество товара
+                priority:
+                  type: string
+                  enum: [high, medium, low]
+                  default: medium
+              additionalProperties: false
+      responses:
+        '200':
+          description: Позиция обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanItem'
+          headers:
+            ETag:
+              description: Новая версия ресурса
+              schema:
+                type: string
+              example: 'v2-xyz789'
+        '201':
+          description: Позиция добавлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict — план заблокирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '412':
+          description: Precondition Failed — ETag не совпадает
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security: [{bearerAuth: []}]
+
+    delete:
+      summary: Удалить позицию из плана
+      tags: [Планы]
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag для защиты от конкурентного изменения
+          schema:
+            type: string
+          example: 'v1-abc123'
+      responses:
+        '200':
+          description: Позиция удалена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict — план заблокирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '412':
+          description: Precondition Failed — ETag не совпадает
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security: [{bearerAuth: []}]
+
+  /calculations:
+    post:
+      summary: Запустить расчёт потребности
+      description: Асинхронный расчёт на основе планов, BOM и остатков WMS
+      tags: [Расчёты]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Уникальный ключ для предотвращения дублирования запросов
+          schema:
+            type: string
+            format: uuid
+          example: '550e8400-e29b-41d4-a716-446655440000'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CalculateRequest'
+      responses:
+        '202':
+          description: Расчёт принят
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  calculationId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [pending, calculating]
+                  statusUrl:
+                    type: string
+                    format: uri
+                  links:
+                    $ref: '#/components/schemas/HateoasLinks'
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Conflict — расчёт уже выполняется
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Unprocessable Entity — ключ идемпотентности уже использован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security: [{bearerAuth: []}]
+
+  /calculations/product/{productId}:
+    post:
+      summary: Рассчитать потребность для одной позиции
+      description: Асинхронный расчёт потребности для конкретного товара
+      tags: [Расчёты]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Уникальный ключ для предотвращения дублирования запросов
+          schema:
+            type: string
+            format: uuid
+          example: '550e8400-e29b-41d4-a716-446655440000'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [period, startDate, endDate]
+              properties:
+                period:
+                  type: string
+                  enum: [month, quarter, year]
+                startDate:
+                  type: string
+                  format: date
+                endDate:
+                  type: string
+                  format: date
+                includeSafetyStock:
+                  type: boolean
+                  default: true
+                safetyStockDays:
+                  type: integer
+                  minimum: 1
+                  maximum: 90
+                  default: 7
+              additionalProperties: false
+      responses:
+        '202':
+          description: Расчёт принят
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  calculationId:
+                    type: string
+                    format: uuid
+                  statusUrl:
+                    type: string
+                    format: uri
+                  links:
+                    $ref: '#/components/schemas/HateoasLinks'
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Товар не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Unprocessable Entity — ключ идемпотентности уже использован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security: [{bearerAuth: []}]
+
+  /calculations/{calculationId}/status:
+    get:
+      summary: Статус расчёта (long-polling)
+      description: Держит соединение открытым до изменения статуса или истечения таймаута
+      tags: [Расчёты]
+      parameters:
+        - name: calculationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: timeout
+          in: query
+          description: Максимальное время ожидания в секундах
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 120
+            default: 30
+          example: 30
+        - name: wait_for_change
+          in: query
+          description: Ждать ли изменения статуса
+          schema:
+            type: boolean
+            default: true
+          example: true
+      responses:
+        '200':
+          description: Статус получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalculationStatus'
+          headers:
+            X-Status-Changed:
+              description: Изменился ли статус с момента запроса
+              schema:
+                type: boolean
+              example: true
+            X-Next-Poll:
+              description: Рекомендуется ли повторный запрос
+              schema:
+                type: boolean
+              example: false
+            ETag:
+              description: Версия статуса для условных запросов
+              schema:
+                type: string
+              example: 'v3-xyz789'
+        '304':
+          description: Not Modified — статус не изменился
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              example: 5
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security: [{bearerAuth: []}]
+
+  /calculations/{calculationId}/result:
+    get:
+      summary: Получить результат расчёта
+      tags: [Расчёты]
+      parameters:
+        - name: calculationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Результат получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalculationResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Unprocessable Entity — расчёт ещё не завершён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security: [{bearerAuth: []}]
+
+components:
+  schemas:
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          example: 1
+        pageSize:
+          type: integer
+          minimum: 1
+          maximum: 100
+          example: 20
+        total:
+          type: integer
+          minimum: 0
+          example: 150
+        totalPages:
+          type: integer
+          minimum: 1
+          example: 8
+
+    HateoasLinks:
+      type: object
+      description: |
+        Ссылки навигации (HATEOAS Level 3).
+        Набор ссылок зависит от статуса ресурса:
+        - draft: доступны delete, update, calculate
+        - approved: доступен только calculate
+        - archived: нет действий
+        - calculating: доступен только status
+      properties:
+        self:
+          type: string
+          format: uri
+          description: Ссылка на текущий ресурс
+          example: '/plans/123'
+        collection:
+          type: string
+          format: uri
+          description: Ссылка на коллекцию
+          example: '/plans'
+        actions:
+          type: array
+          description: Доступные действия над ресурсом
+          items:
+            type: object
+            required: [rel, href, method]
+            properties:
+              rel:
+                type: string
+                description: Тип связи или действия
+                example: delete
+              href:
+                type: string
+                format: uri
+                description: URL для выполнения действия
+                example: '/plans/123'
+              method:
+                type: string
+                enum: [GET, POST, PUT, PATCH, DELETE]
+                description: HTTP-метод для действия
+                example: DELETE
+
+    Error:
+      type: object
+      required: [code, message]
+      description: Стандартный формат ошибки API
+      properties:
+        code:
+          type: string
+          description: Код ошибки для программной обработки
+          example: RESOURCE_NOT_FOUND
+        message:
+          type: string
+          description: Человекочитаемое описание ошибки
+          example: Ресурс не найден
+        details:
+          type: string
+          description: Дополнительные детали ошибки (опционально)
+        timestamp:
+          type: string
+          format: date-time
+          description: Время возникновения ошибки
+        traceId:
+          type: string
+          format: uuid
+          description: ID запроса для отладки на сервере
+
+    DeleteResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Ресурс успешно удален
+        deletedId:
+          type: integer
+          example: 123
+        timestamp:
+          type: string
+          format: date-time
+
+    CreatePlanRequest:
+      type: object
+      required: [period, startDate, endDate, items]
+      properties:
+        period:
+          type: string
+          enum: [month, quarter, year]
+          example: month
+        startDate:
+          type: string
+          format: date
+          example: '2026-04-01'
+        endDate:
+          type: string
+          format: date
+          example: '2026-04-30'
+        items:
+          type: array
+          description: Позиции плана (товары и количества)
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [productId, plannedQuantity]
+            properties:
+              productId:
+                type: integer
+                minimum: 1
+                example: 456
+              productName:
+                type: string
+                maxLength: 200
+                example: 'Товар А'
+              plannedQuantity:
+                type: integer
+                minimum: 1
+                maximum: 999999999
+                example: 100
+              priority:
+                type: string
+                enum: [high, medium, low]
+                default: medium
+                example: medium
+        notes:
+          type: string
+          maxLength: 1000
+          description: Примечание к плану
+          example: 'План на пиковый сезон'
+      additionalProperties: false
+
+    Plan:
+      type: object
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          example: 123
+        period:
+          type: string
+          enum: [month, quarter, year]
+          example: month
+        startDate:
+          type: string
+          format: date
+          example: '2026-04-01'
+        endDate:
+          type: string
+          format: date
+          example: '2026-04-30'
+        status:
+          type: string
+          enum: [draft, approved, archived, calculating]
+          example: draft
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanItem'
+        createdBy:
+          type: string
+          format: uuid
+          description: ID пользователя, создавшего план
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PlanItem:
+      type: object
+      properties:
+        productId:
+          type: integer
+          minimum: 1
+          example: 456
+        productName:
+          type: string
+          maxLength: 200
+          example: 'Товар А'
+        plannedQuantity:
+          type: integer
+          minimum: 1
+          maximum: 999999999
+          example: 100
+        actualQuantity:
+          type: integer
+          minimum: 0
+          example: 85
+        remainingQuantity:
+          type: integer
+          example: 15
+        priority:
+          type: string
+          enum: [high, medium, low]
+          example: medium
+
+    CalculateRequest:
+      type: object
+      required: [includeSafetyStock]
+      properties:
+        planIds:
+          type: array
+          description: ID планов для расчёта (пустой = все активные)
+          items:
+            type: integer
+            minimum: 1
+          maxItems: 100
+          example: [123, 456]
+        includeSafetyStock:
+          type: boolean
+          description: Включить расчёт страхового запаса
+          default: true
+          example: true
+        safetyStockDays:
+          type: integer
+          description: Дней страхового запаса
+          minimum: 1
+          maximum: 90
+          default: 7
+          example: 7
+        excludeProducts:
+          type: array
+          description: Исключить товары из расчёта
+          items:
+            type: integer
+            minimum: 1
+          maxItems: 100
+      additionalProperties: false
+
+    CalculationStatus:
+      type: object
+      required: [id, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+        status:
+          type: string
+          enum: [pending, calculating, completed, failed, cancelled]
+          example: calculating
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Процент выполнения
+          example: 75
+        changed:
+          type: boolean
+          description: Изменился ли статус с момента запроса
+          example: true
+        timeout:
+          type: boolean
+          description: Истёк ли таймаут ожидания
+          example: false
+        error:
+          $ref: '#/components/schemas/CalculationError'
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        resultUrl:
+          type: string
+          format: uri
+          description: URL для получения результатов
+
+    CalculationError:
+      type: object
+      properties:
+        code:
+          type: string
+          enum: [INSUFFICIENT_DATA, INVALID_BOM, DATABASE_ERROR, EXTERNAL_SERVICE_ERROR, TIMEOUT, UNKNOWN]
+          example: INSUFFICIENT_DATA
+        message:
+          type: string
+          example: Недостаточно данных для расчёта
+        details:
+          type: array
+          items:
+            type: string
+          example: ['Отсутствуют остатки для товара 456']
+        retryable:
+          type: boolean
+          description: Можно ли повторить расчёт
+          example: true
+        failedAt:
+          type: string
+          format: date-time
+
+    CalculationResult:
+      type: object
+      required: [calculationId, status, requirements]
+      properties:
+        calculationId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [completed, failed]
+          example: completed
+        summary:
+          type: object
+          properties:
+            totalMaterials:
+              type: integer
+              description: Всего материалов к закупке
+              example: 45
+            totalValue:
+              type: number
+              format: float
+              description: Общая стоимость закупок
+              example: 125000.50
+            urgentCount:
+              type: integer
+              description: Количество срочных закупок
+              example: 5
+        requirements:
+          type: array
+          description: Список рекомендаций по закупкам
+          items:
+            $ref: '#/components/schemas/MaterialRequirement'
+        calculatedAt:
+          type: string
+          format: date-time
+        validUntil:
+          type: string
+          format: date-time
+          description: Действительно до (после нужен пересчёт)
+
+    MaterialRequirement:
+      type: object
+      required: [materialId, materialName, requiredQuantity, priority]
+      properties:
+        materialId:
+          type: integer
+          minimum: 1
+          example: 789
+        materialName:
+          type: string
+          maxLength: 200
+          example: 'Сталь листовая 2мм'
+        requiredQuantity:
+          type: number
+          format: float
+          minimum: 0
+          example: 500.5
+        unit:
+          type: string
+          description: Единица измерения
+          example: кг
+        currentBalance:
+          type: number
+          format: float
+          description: Текущие остатки
+          example: 150.0
+        deficit:
+          type: number
+          format: float
+          description: Дефицит (required - balance)
+          example: 350.5
+        priority:
+          type: string
+          enum: [urgent, high, medium, low]
+          example: urgent
+        recommendedOrderDate:
+          type: string
+          format: date
+          description: Рекомендуемая дата заказа
+        recommendedDeliveryDate:
+          type: string
+          format: date
+          description: Рекомендуемая дата поставки
+
+  responses:
+    BadRequest:
+      description: Некорректные данные запроса
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Не авторизован
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    TooManyRequests:
+      description: Too Many Requests — превышен лимит запросов
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+      headers:
+        Retry-After:
+          description: Секунд до повторной попытки
+          schema:
+            type: integer
+          example: 60
+
+    GatewayTimeout:
+      description: Gateway Timeout — превышено время обработки
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+      headers:
+        Retry-After:
+          description: Секунд до повторной попытки
+          schema:
+            type: integer
+          example: 30
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT токен для аутентификации
+
+security:
+  - bearerAuth: []
