@@ -1,0 +1,13 @@
+openapi: '3.0.3'
+info:
+  title: Контракты для MRP BR-MRP-01
+  version: '1.0'
+  description: Контракты для доступа к MRP 
+servers:
+  - url: https://api.mrp.ru/v1
+paths:
+  /test:
+    get:
+      responses:
+        '200':
+          description: OK
