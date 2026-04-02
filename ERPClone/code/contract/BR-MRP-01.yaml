@@ -2,15 +2,18 @@ openapi: '3.0.3'
 info:
   title: MRP API — BR-MRP-01
   version: '1.0'
-  description: API для расчёта потребности в сырье на основе производственных планов
+  description: |
+    API для расчёта потребности в сырье на основе производственных планов,
+    спецификаций (BOM) и текущих остатков.
   contact:
     name: MRP API Support
-    email: api-mrp@busines.ru
+    email: api-support@mrp.ru
 
 servers:
   - url: https://api.mrp.ru/v1
     description: Production
- 
+  - url: http://localhost:8080/v1
+    description: Development
 
 tags:
   - name: Планы
@@ -22,43 +25,44 @@ paths:
   /plans:
     get:
       summary: Получить список планов
+      description: Возвращает список производственных планов с пагинацией
       tags: [Планы]
       parameters:
         - name: period
           in: query
+          description: Период плана (месяц, квартал, год)
+          required: false
           schema:
             type: string
             enum: [month, quarter, year]
             default: month
+          example: month
         - name: page
           in: query
+          description: Номер страницы для пагинации
+          required: false
           schema:
             type: integer
             minimum: 1
             default: 1
+          example: 1
         - name: pageSize
           in: query
+          description: Количество записей на странице
+          required: false
           schema:
             type: integer
             minimum: 1
             maximum: 100
             default: 20
+          example: 20
       responses:
         '200':
-          description: Успешно
+          description: Список планов успешно получен
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Plan'
-                  pagination:
-                    $ref: '#/components/schemas/Pagination'
-                  links:
-                    $ref: '#/components/schemas/HateoasLinks'
+                $ref: '#/components/schemas/PlansListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -69,6 +73,7 @@ paths:
 
     post:
       summary: Создать производственный план
+      description: Отдел сбыта создаёт новый производственный план
       tags: [Планы]
       parameters:
         - name: Idempotency-Key
@@ -87,20 +92,18 @@ paths:
               $ref: '#/components/schemas/CreatePlanRequest'
       responses:
         '201':
-          description: План создан
+          description: План успешно создан
           headers:
             Location:
+              description: URL созданного ресурса
               schema:
                 type: string
                 format: uri
+              example: '/plans/123'
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Plan'
-                  - properties:
-                      links:
-                        $ref: '#/components/schemas/HateoasLinks'
+                $ref: '#/components/schemas/PlanResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -126,25 +129,24 @@ paths:
   /plans/{planId}:
     get:
       summary: Получить план по ID
+      description: Возвращает детальную информацию о производственном плане
       tags: [Планы]
       parameters:
         - name: planId
           in: path
           required: true
+          description: Уникальный идентификатор плана
           schema:
             type: integer
             minimum: 1
+          example: 123
       responses:
         '200':
-          description: Успешно
+          description: План успешно получен
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Plan'
-                  - properties:
-                      links:
-                        $ref: '#/components/schemas/HateoasLinks'
+                $ref: '#/components/schemas/PlanResponse'
           headers:
             ETag:
               description: Версия ресурса для условных запросов
@@ -163,14 +165,17 @@ paths:
 
     delete:
       summary: Удалить план
+      description: Удаляет производственный план по его идентификатору
       tags: [Планы]
       parameters:
         - name: planId
           in: path
           required: true
+          description: Уникальный идентификатор плана
           schema:
             type: integer
             minimum: 1
+          example: 123
         - name: If-Match
           in: header
           required: false
@@ -179,16 +184,12 @@ paths:
             type: string
           example: 'v1-abc123'
       responses:
-        '200':
-          description: Удалён
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DeleteResponse'
+        '204':
+          description: План успешно удалён (без тела)
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Conflict — план в расчёте
+          description: Conflict — план в расчёте или заблокирован
           content:
             application/json:
               schema:
@@ -216,16 +217,27 @@ paths:
         - name: planId
           in: path
           required: true
+          description: Уникальный идентификатор плана
           schema:
             type: integer
             minimum: 1
+          example: 123
         - name: productId
           in: path
           required: true
+          description: Уникальный идентификатор товара
           schema:
             type: integer
             minimum: 1
-        # ✅ ИСПРАВЛЕНО: добавлен If-Match для PATCH
+          example: 456
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Уникальный ключ для предотвращения дублирования запросов
+          schema:
+            type: string
+            format: uuid
+          example: '550e8400-e29b-41d4-a716-446655440000'
         - name: If-Match
           in: header
           required: false
@@ -238,19 +250,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [plannedQuantity]
-              properties:
-                plannedQuantity:
-                  type: integer
-                  minimum: 1
-                  maximum: 999999999
-                  description: Плановое количество товара
-                priority:
-                  type: string
-                  enum: [high, medium, low]
-                  default: medium
-              additionalProperties: false
+              $ref: '#/components/schemas/UpdatePlanItemRequest'
       responses:
         '200':
           description: Позиция обновлена
@@ -286,6 +286,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '422':
+          description: Unprocessable Entity — ключ идемпотентности уже использован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -296,20 +302,25 @@ paths:
 
     delete:
       summary: Удалить позицию из плана
+      description: Удаляет конкретный товар из плана без удаления всего плана
       tags: [Планы]
       parameters:
         - name: planId
           in: path
           required: true
+          description: Уникальный идентификатор плана
           schema:
             type: integer
             minimum: 1
+          example: 123
         - name: productId
           in: path
           required: true
+          description: Уникальный идентификатор товара
           schema:
             type: integer
             minimum: 1
+          example: 456
         - name: If-Match
           in: header
           required: false
@@ -318,12 +329,8 @@ paths:
             type: string
           example: 'v1-abc123'
       responses:
-        '200':
-          description: Позиция удалена
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DeleteResponse'
+        '204':
+          description: Позиция успешно удалена (без тела)
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -368,28 +375,18 @@ paths:
               $ref: '#/components/schemas/CalculateRequest'
       responses:
         '202':
-          description: Расчёт принят
+          description: Расчёт принят в работу
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  calculationId:
-                    type: string
-                    format: uuid
-                  status:
-                    type: string
-                    enum: [pending, calculating]
-                  statusUrl:
-                    type: string
-                    format: uri
-                  links:
-                    $ref: '#/components/schemas/HateoasLinks'
+                $ref: '#/components/schemas/CalculationAcceptedResponse'
           headers:
             Location:
+              description: URL для отслеживания статуса
               schema:
                 type: string
                 format: uri
+              example: '/calculations/a1b2c3d4-e5f6-7890-abcd-ef1234567890/status'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -421,9 +418,11 @@ paths:
         - name: productId
           in: path
           required: true
+          description: Уникальный идентификатор товара для расчёта
           schema:
             type: integer
             minimum: 1
+          example: 456
         - name: Idempotency-Key
           in: header
           required: true
@@ -437,45 +436,17 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [period, startDate, endDate]
-              properties:
-                period:
-                  type: string
-                  enum: [month, quarter, year]
-                startDate:
-                  type: string
-                  format: date
-                endDate:
-                  type: string
-                  format: date
-                includeSafetyStock:
-                  type: boolean
-                  default: true
-                safetyStockDays:
-                  type: integer
-                  minimum: 1
-                  maximum: 90
-                  default: 7
-              additionalProperties: false
+              $ref: '#/components/schemas/CalculateSingleRequest'
       responses:
         '202':
-          description: Расчёт принят
+          description: Расчёт принят в работу
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  calculationId:
-                    type: string
-                    format: uuid
-                  statusUrl:
-                    type: string
-                    format: uri
-                  links:
-                    $ref: '#/components/schemas/HateoasLinks'
+                $ref: '#/components/schemas/CalculationAcceptedResponse'
           headers:
             Location:
+              description: URL для отслеживания статуса
               schema:
                 type: string
                 format: uri
@@ -504,18 +475,28 @@ paths:
   /calculations/{calculationId}/status:
     get:
       summary: Статус расчёта (long-polling)
-      description: Держит соединение открытым до изменения статуса или истечения таймаута
+      description: |
+        Проверяет статус асинхронного расчёта с поддержкой long-polling.
+        
+        ## Механизм работы:
+        1. Клиент получает ETag из ответа 200
+        2. Клиент отправляет If-None-Match с этим ETag при следующем запросе
+        3. Сервер возвращает 304 Not Modified, если статус не изменился
+        4. Сервер возвращает 200 с новыми данными, если статус изменился
       tags: [Расчёты]
       parameters:
         - name: calculationId
           in: path
           required: true
+          description: Уникальный идентификатор расчёта
           schema:
             type: string
             format: uuid
+          example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
         - name: timeout
           in: query
-          description: Максимальное время ожидания в секундах
+          description: Максимальное время ожидания изменения статуса в секундах
+          required: false
           schema:
             type: integer
             minimum: 1
@@ -524,41 +505,50 @@ paths:
           example: 30
         - name: wait_for_change
           in: query
-          description: Ждать ли изменения статуса
+          description: Ждать ли изменения статуса или вернуть текущий статус сразу
+          required: false
           schema:
             type: boolean
             default: true
           example: true
+        - name: If-None-Match
+          in: header
+          required: false
+          description: ETag версии статуса, которую клиент уже получил
+          schema:
+            type: string
+          example: 'v2-abc123'
       responses:
         '200':
-          description: Статус получен
+          description: Статус получен (изменился или первый запрос)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CalculationStatus'
           headers:
-            X-Status-Changed:
-              description: Изменился ли статус с момента запроса
-              schema:
-                type: boolean
-              example: true
-            X-Next-Poll:
-              description: Рекомендуется ли повторный запрос
-              schema:
-                type: boolean
-              example: false
             ETag:
-              description: Версия статуса для условных запросов
+              description: Версия статуса для следующего запроса
               schema:
                 type: string
               example: 'v3-xyz789'
+            X-Status-Changed:
+              description: Изменился ли статус с момента последнего запроса
+              schema:
+                type: boolean
+              example: true
         '304':
           description: Not Modified — статус не изменился
           headers:
             Retry-After:
+              description: Секунд до следующего запроса
               schema:
                 type: integer
               example: 5
+            ETag:
+              description: Текущая версия статуса на сервере
+              schema:
+                type: string
+              example: 'v2-abc123'
         '404':
           $ref: '#/components/responses/NotFound'
         '401':
@@ -570,17 +560,20 @@ paths:
   /calculations/{calculationId}/result:
     get:
       summary: Получить результат расчёта
+      description: Возвращает результаты завершённого расчёта потребности в сырье
       tags: [Расчёты]
       parameters:
         - name: calculationId
           in: path
           required: true
+          description: Уникальный идентификатор расчёта
           schema:
             type: string
             format: uuid
+          example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
       responses:
         '200':
-          description: Результат получен
+          description: Результат расчёта получен
           content:
             application/json:
               schema:
@@ -603,125 +596,118 @@ paths:
 
 components:
   schemas:
-    Pagination:
-      type: object
-      properties:
-        page:
-          type: integer
-          minimum: 1
-          example: 1
-        pageSize:
-          type: integer
-          minimum: 1
-          maximum: 100
-          example: 20
-        total:
-          type: integer
-          minimum: 0
-          example: 150
-        totalPages:
-          type: integer
-          minimum: 1
-          example: 8
+    # ========== ОТВЕТЫ (обёртки для списков) ==========
 
-    HateoasLinks:
+    PlansListResponse:
       type: object
-      description: |
-        Ссылки навигации (HATEOAS Level 3).
-        Набор ссылок зависит от статуса ресурса:
-        - draft: доступны delete, update, calculate
-        - approved: доступен только calculate
-        - archived: нет действий
-        - calculating: доступен только status
+      description: Ответ со списком планов и пагинацией
+      required:
+        - items
+        - pagination
       properties:
-        self:
-          type: string
-          format: uri
-          description: Ссылка на текущий ресурс
-          example: '/plans/123'
-        collection:
-          type: string
-          format: uri
-          description: Ссылка на коллекцию
-          example: '/plans'
-        actions:
+        items:
           type: array
-          description: Доступные действия над ресурсом
           items:
-            type: object
-            required: [rel, href, method]
-            properties:
-              rel:
-                type: string
-                description: Тип связи или действия
-                example: delete
-              href:
-                type: string
-                format: uri
-                description: URL для выполнения действия
-                example: '/plans/123'
-              method:
-                type: string
-                enum: [GET, POST, PUT, PATCH, DELETE]
-                description: HTTP-метод для действия
-                example: DELETE
+            $ref: '#/components/schemas/Plan'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        links:
+          $ref: '#/components/schemas/HateoasLinks'
+      additionalProperties: false
 
-    Error:
+    PlanResponse:
       type: object
-      required: [code, message]
-      description: Стандартный формат ошибки API
+      description: Ответ с данными плана
+      required:
+        - id
+        - period
+        - startDate
+        - endDate
+        - status
+        - items
+        - createdAt
       properties:
-        code:
+        id:
+          type: integer
+          minimum: 1
+        period:
           type: string
-          description: Код ошибки для программной обработки
-          example: RESOURCE_NOT_FOUND
-        message:
+          enum: [month, quarter, year]
+        startDate:
           type: string
-          description: Человекочитаемое описание ошибки
-          example: Ресурс не найден
-        details:
+          format: date
+        endDate:
           type: string
-          description: Дополнительные детали ошибки (опционально)
-        timestamp:
+          format: date
+        status:
           type: string
-          format: date-time
-          description: Время возникновения ошибки
-        traceId:
+          enum: [draft, approved, archived, calculating]
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanItem'
+        notes:
+          type: string
+          maxLength: 1000
+        createdBy:
           type: string
           format: uuid
-          description: ID запроса для отладки на сервере
-
-    DeleteResponse:
-      type: object
-      properties:
-        success:
-          type: boolean
-          example: true
-        message:
-          type: string
-          example: Ресурс успешно удален
-        deletedId:
-          type: integer
-          example: 123
-        timestamp:
+        createdAt:
           type: string
           format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        links:
+          $ref: '#/components/schemas/HateoasLinks'
+      additionalProperties: false
+
+    CalculationAcceptedResponse:
+      type: object
+      description: Ответ о принятии расчёта в работу
+      required:
+        - calculationId
+        - status
+        - statusUrl
+      properties:
+        calculationId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, calculating]
+        statusUrl:
+          type: string
+          format: uri
+        links:
+          $ref: '#/components/schemas/HateoasLinks'
+      additionalProperties: false
+
+    # ========== ЗАПРОСЫ ==========
 
     CreatePlanRequest:
       type: object
-      required: [period, startDate, endDate, items]
+      description: Запрос на создание производственного плана
+      required:
+        - period
+        - startDate
+        - endDate
+        - items
       properties:
         period:
           type: string
           enum: [month, quarter, year]
+          description: Период плана
           example: month
         startDate:
           type: string
           format: date
+          description: Начало периода
           example: '2026-04-01'
         endDate:
           type: string
           format: date
+          description: Конец периода
           example: '2026-04-30'
         items:
           type: array
@@ -735,20 +721,24 @@ components:
               productId:
                 type: integer
                 minimum: 1
+                description: Уникальный идентификатор товара
                 example: 456
               productName:
                 type: string
                 maxLength: 200
+                description: Наименование товара
                 example: 'Товар А'
               plannedQuantity:
                 type: integer
                 minimum: 1
                 maximum: 999999999
+                description: Плановое количество для производства
                 example: 100
               priority:
                 type: string
                 enum: [high, medium, low]
                 default: medium
+                description: Приоритет позиции
                 example: medium
         notes:
           type: string
@@ -757,75 +747,31 @@ components:
           example: 'План на пиковый сезон'
       additionalProperties: false
 
-    Plan:
+    UpdatePlanItemRequest:
       type: object
+      description: Запрос на обновление позиции плана
+      required:
+        - plannedQuantity
       properties:
-        id:
-          type: integer
-          minimum: 1
-          example: 123
-        period:
-          type: string
-          enum: [month, quarter, year]
-          example: month
-        startDate:
-          type: string
-          format: date
-          example: '2026-04-01'
-        endDate:
-          type: string
-          format: date
-          example: '2026-04-30'
-        status:
-          type: string
-          enum: [draft, approved, archived, calculating]
-          example: draft
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/PlanItem'
-        createdBy:
-          type: string
-          format: uuid
-          description: ID пользователя, создавшего план
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-
-    PlanItem:
-      type: object
-      properties:
-        productId:
-          type: integer
-          minimum: 1
-          example: 456
-        productName:
-          type: string
-          maxLength: 200
-          example: 'Товар А'
         plannedQuantity:
           type: integer
           minimum: 1
           maximum: 999999999
+          description: Плановое количество товара
           example: 100
-        actualQuantity:
-          type: integer
-          minimum: 0
-          example: 85
-        remainingQuantity:
-          type: integer
-          example: 15
         priority:
           type: string
           enum: [high, medium, low]
+          default: medium
+          description: Приоритет позиции
           example: medium
+      additionalProperties: false
 
     CalculateRequest:
       type: object
-      required: [includeSafetyStock]
+      description: Запрос на запуск расчёта потребности
+      required:
+        - includeSafetyStock
       properties:
         planIds:
           type: array
@@ -856,17 +802,293 @@ components:
           maxItems: 100
       additionalProperties: false
 
+    CalculateSingleRequest:
+      type: object
+      description: Запрос на расчёт для одной позиции
+      required:
+        - period
+        - startDate
+        - endDate
+      properties:
+        period:
+          type: string
+          enum: [month, quarter, year]
+          description: Период расчёта
+          example: month
+        startDate:
+          type: string
+          format: date
+          description: Начало периода
+          example: '2026-04-01'
+        endDate:
+          type: string
+          format: date
+          description: Конец периода
+          example: '2026-04-30'
+        includeSafetyStock:
+          type: boolean
+          default: true
+          description: Включить расчёт страхового запаса
+          example: true
+        safetyStockDays:
+          type: integer
+          minimum: 1
+          maximum: 90
+          default: 7
+          description: Количество дней страхового запаса
+          example: 7
+      additionalProperties: false
+
+    # ========== БАЗОВЫЕ СХЕМЫ ==========
+
+    Pagination:
+      type: object
+      description: Информация о пагинации
+      required:
+        - page
+        - pageSize
+        - total
+        - totalPages
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          description: Текущая страница
+          example: 1
+        pageSize:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Количество записей на странице
+          example: 20
+        total:
+          type: integer
+          minimum: 0
+          description: Общее количество записей
+          example: 150
+        totalPages:
+          type: integer
+          minimum: 1
+          description: Общее количество страниц
+          example: 8
+      additionalProperties: false
+
+    HateoasLinks:
+      type: object
+      description: Ссылки навигации (HATEOAS Level 3)
+      required:
+      - self
+      properties:
+        self:
+          type: string
+          format: uri
+          description: Ссылка на текущий ресурс
+          example: '/plans/123'
+        collection:
+          type: string
+          format: uri
+          description: Ссылка на коллекцию
+          example: '/plans'
+        actions:
+          type: array
+          description: Доступные действия
+          items:
+            type: object
+            required: [rel, href, method]
+            properties:
+              rel:
+                type: string
+                example: delete
+              href:
+                type: string
+                format: uri
+                example: '/plans/123'
+              method:
+                type: string
+                enum: [GET, POST, PUT, PATCH, DELETE]
+                example: DELETE
+        result:
+          type: string
+          format: uri
+          description: Ссылка на результат расчёта
+          example: '/calculations/{id}/result'
+        status:
+          type: string
+          format: uri
+          description: Ссылка на статус расчёта
+          example: '/calculations/{id}/status'
+      additionalProperties: false
+
+    Error:
+      type: object
+      description: Стандартный формат ошибки API
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Код ошибки
+          example: RESOURCE_NOT_FOUND
+        message:
+          type: string
+          description: Описание ошибки
+          example: Ресурс не найден
+        details:
+          type: string
+          description: Дополнительные детали
+        timestamp:
+          type: string
+          format: date-time
+          description: Время возникновения
+        traceId:
+          type: string
+          format: uuid
+          description: ID запроса для отладки
+      additionalProperties: false
+
+    DeleteResponse:
+      type: object
+      description: Ответ на успешное удаление
+      required:
+        - success
+        - message
+      properties:
+        success:
+          type: boolean
+          description: Флаг успешного удаления
+          example: true
+        message:
+          type: string
+          description: Сообщение
+          example: Ресурс успешно удален
+        deletedId:
+          type: integer
+          description: ID удалённого ресурса
+          example: 123
+        timestamp:
+          type: string
+          format: date-time
+          description: Время удаления
+      additionalProperties: false
+
+    Plan:
+      type: object
+      description: Производственный план
+      required:
+        - id
+        - period
+        - startDate
+        - endDate
+        - status
+        - items
+        - createdAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          description: Уникальный идентификатор плана
+          example: 123
+        period:
+          type: string
+          enum: [month, quarter, year]
+          description: Период плана
+          example: month
+        startDate:
+          type: string
+          format: date
+          description: Начало периода
+          example: '2026-04-01'
+        endDate:
+          type: string
+          format: date
+          description: Конец периода
+          example: '2026-04-30'
+        status:
+          type: string
+          enum: [draft, approved, archived, calculating]
+          description: Статус плана
+          example: draft
+        items:
+          type: array
+          description: Позиции плана
+          items:
+            $ref: '#/components/schemas/PlanItem'
+        notes:
+          type: string
+          maxLength: 1000
+          description: Примечание к плану
+          example: 'План на пиковый сезон'
+        createdBy:
+          type: string
+          format: uuid
+          description: ID пользователя
+        createdAt:
+          type: string
+          format: date-time
+          description: Время создания
+        updatedAt:
+          type: string
+          format: date-time
+          description: Время обновления
+      additionalProperties: false
+
+    PlanItem:
+      type: object
+      description: Позиция производственного плана
+      required:
+        - productId
+        - plannedQuantity
+      properties:
+        productId:
+          type: integer
+          minimum: 1
+          description: Уникальный идентификатор товара
+          example: 456
+        productName:
+          type: string
+          maxLength: 200
+          description: Наименование товара
+          example: 'Товар А'
+        plannedQuantity:
+          type: integer
+          minimum: 1
+          maximum: 999999999
+          description: Плановое количество
+          example: 100
+        actualQuantity:
+          type: integer
+          minimum: 0
+          description: Фактическое количество
+          example: 85
+        remainingQuantity:
+          type: integer
+          description: Осталось выполнить
+          example: 15
+        priority:
+          type: string
+          enum: [high, medium, low]
+          description: Приоритет
+          example: medium
+      additionalProperties: false
+
     CalculationStatus:
       type: object
-      required: [id, status, createdAt]
+      description: Статус асинхронного расчёта
+      required:
+        - id
+        - status
+        - createdAt
       properties:
         id:
           type: string
           format: uuid
+          description: Уникальный идентификатор расчёта
           example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
         status:
           type: string
           enum: [pending, calculating, completed, failed, cancelled]
+          description: Текущий статус
           example: calculating
         progress:
           type: integer
@@ -876,104 +1098,141 @@ components:
           example: 75
         changed:
           type: boolean
-          description: Изменился ли статус с момента запроса
+          description: Изменился ли статус
           example: true
         timeout:
           type: boolean
-          description: Истёк ли таймаут ожидания
+          description: Истёк ли таймаут
           example: false
         error:
           $ref: '#/components/schemas/CalculationError'
         createdAt:
           type: string
           format: date-time
+          description: Время создания
         completedAt:
           type: string
           format: date-time
+          description: Время завершения
         resultUrl:
           type: string
           format: uri
           description: URL для получения результатов
+          example: '/calculations/{id}/result'
+        links:
+          $ref: '#/components/schemas/HateoasLinks'
+      additionalProperties: false
 
     CalculationError:
       type: object
+      description: Ошибка выполнения расчёта
+      required:  
+      - code
+      - message
       properties:
         code:
           type: string
           enum: [INSUFFICIENT_DATA, INVALID_BOM, DATABASE_ERROR, EXTERNAL_SERVICE_ERROR, TIMEOUT, UNKNOWN]
+          description: Код ошибки
           example: INSUFFICIENT_DATA
         message:
           type: string
-          example: Недостаточно данных для расчёта
+          description: Описание ошибки
+          example: Недостаточно данных
         details:
           type: array
+          description: Детали ошибки
           items:
             type: string
-          example: ['Отсутствуют остатки для товара 456']
+          example: ['Отсутствуют остатки']
         retryable:
           type: boolean
-          description: Можно ли повторить расчёт
+          description: Можно ли повторить
           example: true
         failedAt:
           type: string
           format: date-time
+          description: Время ошибки
+      additionalProperties: false
 
     CalculationResult:
       type: object
-      required: [calculationId, status, requirements]
+      description: Результат расчёта потребности
+      required:
+        - calculationId
+        - status
+        - requirements
+        - calculatedAt
       properties:
         calculationId:
           type: string
           format: uuid
+          description: Уникальный идентификатор расчёта
+          example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
         status:
           type: string
           enum: [completed, failed]
+          description: Статус расчёта
           example: completed
         summary:
           type: object
+          description: Сводная информация
           properties:
             totalMaterials:
               type: integer
-              description: Всего материалов к закупке
+              description: Всего материалов
               example: 45
             totalValue:
               type: number
               format: float
-              description: Общая стоимость закупок
+              description: Общая стоимость
               example: 125000.50
             urgentCount:
               type: integer
-              description: Количество срочных закупок
+              description: Количество срочных
               example: 5
+          additionalProperties: false
         requirements:
           type: array
-          description: Список рекомендаций по закупкам
+          description: Список рекомендаций
           items:
             $ref: '#/components/schemas/MaterialRequirement'
         calculatedAt:
           type: string
           format: date-time
+          description: Время выполнения
         validUntil:
           type: string
           format: date-time
-          description: Действительно до (после нужен пересчёт)
+          description: Действительно до
+        links:
+          $ref: '#/components/schemas/HateoasLinks'
+      additionalProperties: false
 
     MaterialRequirement:
       type: object
-      required: [materialId, materialName, requiredQuantity, priority]
+      description: Рекомендация по закупке
+      required:
+        - materialId
+        - materialName
+        - requiredQuantity
+        - priority
       properties:
         materialId:
           type: integer
           minimum: 1
+          description: Уникальный идентификатор материала
           example: 789
         materialName:
           type: string
           maxLength: 200
+          description: Наименование материала
           example: 'Сталь листовая 2мм'
         requiredQuantity:
           type: number
           format: float
           minimum: 0
+          description: Требуемое количество
           example: 500.5
         unit:
           type: string
@@ -987,20 +1246,42 @@ components:
         deficit:
           type: number
           format: float
-          description: Дефицит (required - balance)
+          description: Дефицит
           example: 350.5
         priority:
           type: string
           enum: [urgent, high, medium, low]
+          description: Приоритет закупки
           example: urgent
         recommendedOrderDate:
           type: string
           format: date
           description: Рекомендуемая дата заказа
+          example: '2026-04-05'
         recommendedDeliveryDate:
           type: string
           format: date
           description: Рекомендуемая дата поставки
+          example: '2026-04-15'
+        supplierSuggestions:
+          type: array
+          description: Рекомендуемые поставщики
+          items:
+            type: object
+            properties:
+              supplierId:
+                type: integer
+                example: 10
+              supplierName:
+                type: string
+                example: 'Поставщик ООО'
+              leadTimeDays:
+                type: integer
+                example: 10
+            additionalProperties: false
+        links:
+          $ref: '#/components/schemas/HateoasLinks'
+      additionalProperties: false
 
   responses:
     BadRequest:
