@@ -1,0 +1,10 @@
+gitignore
+# Исключаем папку trash
+trash/
+trash/*
+
+# Другие временные файлы (опционально)
+*.log
+*.tmp
+.DS_Store
+node_modules/

@@ -1,0 +1,224 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/mrp-wms/schemas/mrp_result.schema.json",
+  "title": "MRPResult",
+  "description": "Результат расчёта потребности в материалах (MRP) для системы MRP/WMS",
+  "type": "object",
+  "required": ["_id", "planId", "calculatedAt", "status", "items"],
+  "properties": {
+    "_id": {
+      "description": "Уникальный идентификатор документа в MongoDB (ObjectId)",
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{24}$",
+      "minLength": 24,
+      "maxLength": 24
+    },
+    "planId": {
+      "description": "Ссылка на план производства в PostgreSQL (UUID)",
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "planNumber": {
+      "description": "Номер плана производства для отображения",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50,
+      "examples": ["PLAN-2024-04", "PLAN-2024-05"]
+    },
+    "calculatedAt": {
+      "description": "Дата и время выполнения расчёта (ISO 8601, UTC)",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "horizonDays": {
+      "description": "Горизонт планирования в днях",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 365,
+      "default": 30
+    },
+    "status": {
+      "description": "Статус выполнения расчёта",
+      "type": "string",
+      "enum": ["PENDING", "COMPLETED", "FAILED"],
+      "default": "PENDING"
+    },
+    "totalMaterials": {
+      "description": "Общее количество материалов в расчёте",
+      "type": "integer",
+      "minimum": 0
+    },
+    "totalDeficit": {
+      "description": "Суммарный дефицит по всем материалам",
+      "type": "number",
+      "minimum": 0,
+      "multipleOf": 0.01
+    },
+    "urgentCount": {
+      "description": "Количество срочных позиций (priority: URGENT или HIGH)",
+      "type": "integer",
+      "minimum": 0
+    },
+    "totalBudget": {
+      "description": "Общий бюджет закупок по результатам расчёта",
+      "type": "number",
+      "minimum": 0,
+      "multipleOf": 0.01
+    },
+    "calculatedBy": {
+      "description": "ID пользователя, запустившего расчёт (ссылка на users.id в PostgreSQL)",
+      "type": "string",
+      "format": "uuid"
+    },
+    "items": {
+      "description": "Массив позиций расчёта — рекомендации по закупке материалов",
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "$ref": "#/definitions/MRPResultItem"
+      }
+    }
+  },
+  "definitions": {
+    "MRPResultItem": {
+      "type": "object",
+      "description": "Позиция расчёта MRP — рекомендация по закупке одного материала",
+      "required": ["id", "resultId", "materialId", "materialName", "deficit", "priority"],
+      "properties": {
+        "id": {
+          "description": "Уникальный идентификатор позиции",
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{24}$"
+        },
+        "resultId": {
+          "description": "Ссылка на родительский документ MRPResult",
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{24}$"
+        },
+        "materialId": {
+          "description": "ID материала в PostgreSQL (nomenclature.id или materials.id)",
+          "type": "string",
+          "format": "uuid"
+        },
+        "materialName": {
+          "description": "Наименование материала для отображения (денормализация)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "materialSku": {
+          "description": "Артикул/код материала (денормализация)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "unitOfMeasure": {
+          "description": "Единица измерения материала (кг, шт, м и т.д.)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20,
+          "examples": ["кг", "шт", "м", "л", "м2"]
+        },
+        "requiredQty": {
+          "description": "Требуемое количество материала для плана",
+          "type": "number",
+          "minimum": 0,
+          "multipleOf": 0.001
+        },
+        "availableQty": {
+          "description": "Доступное количество на складе",
+          "type": "number",
+          "minimum": 0,
+          "multipleOf": 0.001
+        },
+        "deficit": {
+          "description": "Дефицит: requiredQty - availableQty (сколько нужно заказать)",
+          "type": "number",
+          "minimum": 0,
+          "multipleOf": 0.001
+        },
+        "safetyStockQty": {
+          "description": "Страховой запас материала",
+          "type": "number",
+          "minimum": 0,
+          "multipleOf": 0.001,
+          "default": 0
+        },
+        "recommendedOrderDate": {
+          "description": "Рекомендуемая дата размещения заказа (с учётом срока поставки)",
+          "type": "string",
+          "format": "date",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "requiredDeliveryDate": {
+          "description": "Требуемая дата доставки материала на склад",
+          "type": "string",
+          "format": "date",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "leadTimeDays": {
+          "description": "Срок поставки от поставщика в днях",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 365,
+          "default": 7
+        },
+        "recommendedSupplierId": {
+          "description": "ID рекомендованного поставщика (ссылка на suppliers.id в PostgreSQL)",
+          "type": "string",
+          "format": "uuid"
+        },
+        "recommendedSupplierName": {
+          "description": "Название поставщика для отображения (денормализация)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "estimatedUnitPrice": {
+          "description": "Ориентировочная цена за единицу материала",
+          "type": "number",
+          "minimum": 0,
+          "multipleOf": 0.01
+        },
+        "totalBudget": {
+          "description": "Общая стоимость закупки: deficit × estimatedUnitPrice",
+          "type": "number",
+          "minimum": 0,
+          "multipleOf": 0.01
+        },
+        "priority": {
+          "description": "Приоритет закупки для сортировки в интерфейсе снабженца",
+          "type": "string",
+          "enum": ["URGENT", "HIGH", "MEDIUM", "LOW"],
+          "default": "MEDIUM"
+        },
+        "isCritical": {
+          "description": "Флаг критичности: если true — без материала остановится производство",
+          "type": "boolean",
+          "default": false
+        },
+        "sourcePlanNumber": {
+          "description": "Номер плана производства, породившего эту потребность",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "sourceProductionOrders": {
+          "description": "Массив номеров производственных заказов, требующих этот материал",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
