@@ -1,0 +1,186 @@
+@startuml
+' Настройки стиля
+skinparam linetype ortho
+skinparam packageStyle rectangle
+skinparam class {
+    BackgroundColor #FEFECE
+    BorderColor Black
+    ArrowColor Black
+    FontSize 12
+}
+
+title Модель данных MongoDB (NoSQL) — 6 Коллекций (Финальная версия)
+
+' ==================== ДОМЕН: ЛОГИ И АУДИТ ====================
+package "Логи и Аудит" {
+
+    class AuditLog <<Document>> {
+        +id: ObjectId
+        +userId: UUID
+        +actionType: Enum[CREATE, UPDATE, DELETE]
+        +entityType: String
+        +entityId: UUID
+        +oldValue: JSON
+        +newValue: JSON
+        +ipAddress: String
+        +timestamp: DateTime
+        +partition: Integer
+    }
+
+    class IntegrationLog <<Document>> {
+        +id: ObjectId
+        +direction: Enum[IN, OUT]
+        +endpoint: String
+        +payload: JSON
+        +responseStatus: Integer
+        +errorMessage: String
+        +retryCount: Integer
+        +createdAt: DateTime
+        +processedAt: DateTime
+    }
+}
+
+' ==================== ДОМЕН: АНАЛИТИКА И MRP ====================
+package "Аналитика и MRP" {
+
+    class MRPResult <<Document>> {
+        +id: ObjectId
+        +planId: UUID
+        +calculatedAt: DateTime
+        +horizonDays: Integer
+        +status: Enum[PENDING, COMPLETED, FAILED]
+        +totalMaterials: Integer
+        +totalDeficit: Decimal
+        +urgentCount: Integer
+    }
+
+    class MRPResultItem <<Document>> {
+        +id: ObjectId
+        +resultId: UUID
+        +materialId: UUID
+        +materialName: String
+        +requiredQty: Decimal
+        +availableQty: Decimal
+        +deficit: Decimal
+        +recommendedDate: Date
+       
+    }
+
+    class StockForecast <<Document>> {
+        +id: ObjectId
+        +materialId: UUID
+        +materialName: String
+        +warehouseId: UUID
+        +warehouseName: String
+        +forecastDate: Date
+        +projectedQty: Decimal
+        +sourceEvents: String[]
+    }
+}
+
+' ==================== ДОМЕН: СКЛАД (Оперативные) ====================
+package "Складские Операции" {
+
+    class Reservation <<Document>> {
+        +id: ObjectId
+        +salesOrderId: UUID
+        +salesOrderNumber: String
+        +materialId: UUID
+        +materialName: String
+        +batchId: UUID
+        +quantity: Decimal
+        +expiresAt: DateTime
+        +status: Enum[ACTIVE, RELEASED, EXPIRED]
+        +createdAt: DateTime
+    }
+
+    class WarehouseRoute <<Document>> {
+        +id: ObjectId
+        +warehouseId: UUID
+        +routeName: String
+        +routeType: Enum[PICKING, PUTAWAY, INVENTORY]
+        +isActive: Boolean
+        +waypoints: RouteWaypoint[]
+        +createdAt: DateTime
+        +updatedAt: DateTime
+    }
+
+    class RouteWaypoint {
+        +cellCode: String
+        +sequenceNumber: Integer
+        +actionType: Enum[STOP, PASS]
+        +estimatedDistance: Integer
+    }
+}
+
+' ==================== СВЯЗИ (Встраивание) ====================
+
+' Встраивание точек маршрута
+WarehouseRoute "1" *-- "0..*" RouteWaypoint : содержит маршрут
+
+' Ссылка между MRP Result и Items
+MRPResult "1" -- "0..*" MRPResultItem : содержит позиции
+
+' ==================== ПОЯСНЕНИЯ ====================
+
+note right of MRPResult
+  Summary поля для быстрых дашбордов
+  planId: ссылка на план производства (SQL)
+  Разделено от Items для избежания 16MB лимита
+end note
+
+note right of MRPResultItem
+  resultId: ссылка на MRPResult
+  materialName: денормализация для запросов
+end note
+
+note right of Reservation
+  salesOrderNumber: денормализация (из SQL)
+  materialName: денормализация (из SQL)
+  expiresAt: TTL Index (автоудаление)
+  Избегает distributed join для частых запросов
+end note
+
+note right of AuditLog
+  partition: подготовка к шардированию
+  Для MVP: MongoDB
+  Для 10M+ записей/день: ClickHouse/Elasticsearch
+end note
+
+note right of WarehouseRoute
+  waypoints: встроенный массив (небольшой размер)
+  isActive: флаг актуальности маршрута
+end note
+
+note bottom of StockForecast
+  materialName, warehouseName: денормализация
+  sourceEvents: ["PO-123", "SO-456", "WO-789"]
+  Пересчитываемые данные, можно восстановить
+end note
+
+' ==================== ИНДЕКСЫ ====================
+
+note left of AuditLog
+  📊 Индексы:
+  - timestamp: -1
+  - userId + timestamp
+  - entityType + entityId
+  - partition
+end note
+
+note left of Reservation
+  📊 Индексы:
+  - expiresAt (TTL)
+  - salesOrderId
+  - materialId + status
+  - status + expiresAt
+end note
+
+note left of MRPResultItem
+  📊 Индексы:
+  - resultId
+  - materialId + deficit
+  - recommendedDate
+end note
+
+@enduml
