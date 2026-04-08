@@ -1,0 +1,573 @@
+@startuml
+skinparam SwimlaneWidth 200
+skinparam ActivityBorderColor #333333
+skinparam ActivityBackgroundColor #FFFFFF
+skinparam ArrowColor #555555
+skinparam FontName "Segoe UI"
+skinparam NoteBackgroundColor #FFFFCC
+skinparam NoteBorderColor #999999
+
+title Расчёт MRP и формирование плана закупок (v3 - Production Ready)
+
+|🖥️ Web Client|
+start
+:Пользователь открывает форму "Расчёт MRP";
+:Ввод данных: продукты, количество, период;
+:Генерация idempotency_key = UUID;
+note right
+  **Идемпотентность:**
+  Защита от дублирования
+  при повторных запросах
+end note
+
+:Нажатие кнопки "Рассчитать";
+:POST /api/mrp/calculate\nX-Idempotency-Key: {uuid};
+
+|🔌 API Gateway|
+:Получение HTTP-запроса;
+:Извлечение JWT токена;
+
+if (Токен присутствует?) then (Нет)
+  |🖥️ Web Client|
+  :HTTP 401 Unauthorized;
+  :Показ ошибки;
+  stop
+else (Да)
+endif
+
+|🔌 API Gateway|
+:Валидация JWT токена;
+
+if (Токен валиден?) then (Нет)
+  |🖥️ Web Client|
+  :HTTP 401 Unauthorized;
+  :Показ ошибки;
+  stop
+else (Да)
+endif
+
+|🔌 API Gateway|
+:Проверка прав доступа;
+
+if (Права есть?) then (Нет)
+  |🖥️ Web Client|
+  :HTTP 403 Forbidden;
+  :Показ ошибки;
+  stop
+else (Да)
+endif
+
+|🔌 API Gateway|
+:Базовая валидация JSON;
+
+if (JSON корректен?) then (Нет)
+  |🖥️ Web Client|
+  :HTTP 400 Bad Request;
+  :Показ ошибки;
+  stop
+else (Да)
+endif
+
+|🔌 API Gateway|
+:Маршрутизация в MRP Service;
+
+|⚙️ MRP Service|
+:Получение запроса;
+
+' ==================== ИДЕМПОТЕНТНОСТЬ ====================
+:Извлечение idempotency_key;
+
+if (idempotency_key присутствует?) then (Да)
+  :SELECT * FROM mrp_calculations\nWHERE idempotency_key = ?;
+
+  if (Расчёт существует?) then (Да)
+    :HTTP 200 OK (cached);
+    |🔌 API Gateway|
+    :Передача ответа;
+    |🖥️ Web Client|
+    :Отображение результата;
+    stop
+  else (Нет)
+  endif
+else (Нет)
+endif
+
+|⚙️ MRP Service|
+:Валидация бизнес-правил;
+
+if (Правила соблюдены?) then (Нет)
+  |🔌 API Gateway|
+  :HTTP 400 Bad Request;
+  :Передача ответа;
+  |🖥️ Web Client|
+  :Показ ошибок;
+  stop
+else (Да)
+endif
+
+|⚙️ MRP Service|
+:Подключение к PostgreSQL;
+
+if (Соединение установлено?) then (Нет)
+  |🔌 API Gateway|
+  :HTTP 503 Service Unavailable;
+  :Передача ответа;
+  |🖥️ Web Client|
+  :Показ ошибки;
+  stop
+else (Да)
+endif
+
+|⚙️ MRP Service|
+:BEGIN TRANSACTION;
+:INSERT INTO production_plans;
+
+if (INSERT успешен?) then (Нет)
+  :ROLLBACK;
+  |🔌 API Gateway|
+  :HTTP 500;
+  :Передача ответа;
+  |🖥️ Web Client|
+  :Показ ошибки;
+  stop
+else (Да)
+endif
+
+|⚙️ MRP Service|
+:INSERT INTO mrp_calculations\n(idempotency_key,\ncancellation_requested=false);
+
+if (INSERT успешен?) then (Нет)
+  :ROLLBACK;
+  |🔌 API Gateway|
+  :HTTP 500;
+  :Передача ответа;
+  |🖥️ Web Client|
+  :Показ ошибки;
+  stop
+else (Да)
+endif
+
+|⚙️ MRP Service|
+:COMMIT;
+:Логирование начала;
+
+' ==================== ЗАГРУЗКА BOM ====================
+:Инициализация списков;
+
+repeat
+  |⚙️ MRP Service|
+  :SELECT cancellation_requested\nFROM mrp_calculations WHERE id = ?;
+
+  if (cancellation_requested?) then (Да)
+    :UPDATE SET status='CANCELLED';
+    |🔌 API Gateway|
+    :HTTP 200 OK\nBody: {"status": "CANCELLED"};
+    :Передача ответа;
+    |🖥️ Web Client|
+    :Показ: "Расчёт отменён";
+    stop
+  else (Нет)
+  endif
+
+  |⚙️ MRP Service|
+  :Выбор продукта;
+  :retry_count = 0;
+
+  repeat
+    |⚙️ MRP Service|
+    :GET /api/bom/specifications/{id}\n(timeout 5 сек);
+
+    |📦 BOM Service|
+    :Получение запроса;
+    :Подключение к БД;
+
+    if (Соединение OK?) then (Нет)
+      |⚙️ MRP Service|
+      :retry_count++;
+      :Пауза = 2^retry_count секунд;
+      note right
+        Exponential backoff:
+        2с → 4с → 8с
+      end note
+
+      if (retry_count < 3?) then (Да)
+        :Повтор попытки;
+      else (Нет)
+        :Пометка failed;
+      endif
+    else (Да)
+      |📦 BOM Service|
+      :SELECT bom_specifications;
+
+      if (Найдена?) then (Нет)
+        :HTTP 404;
+        |⚙️ MRP Service|
+        :Пометка failed;
+      else (Да)
+        |📦 BOM Service|
+        :SELECT bom_items;
+
+        if (Найдены?) then (Нет)
+          :HTTP 404;
+          |⚙️ MRP Service|
+          :Пометка failed;
+        else (Да)
+          |📦 BOM Service|
+          :HTTP 200 OK;
+          |⚙️ MRP Service|
+          :success = true;
+        endif
+      endif
+    endif
+
+  repeat while (Есть ошибки И retry_count < 3) is (Да)
+  -> (Нет);
+
+  |⚙️ MRP Service|
+  if (success?) then (Да)
+    repeat
+      |⚙️ MRP Service|
+      :Расчёт required_qty;
+      :Добавление в список;
+    repeat while (Есть компоненты?) is (Да)
+    -> (Нет);
+  else (Нет)
+  endif
+
+repeat while (Есть продукты?) is (Да)
+-> (Нет);
+
+|⚙️ MRP Service|
+:Все продукты обработаны;
+
+' ==================== РАСЧЁТ ДЕФИЦИТОВ ====================
+repeat
+  |⚙️ MRP Service|
+  :SELECT cancellation_requested;
+
+  if (cancellation_requested?) then (Да)
+    :UPDATE SET status='CANCELLED';
+    |🔌 API Gateway|
+    :HTTP 200 OK\nBody: {"status": "CANCELLED"};
+    :Передача ответа;
+    |🖥️ Web Client|
+    :Показ: "Расчёт отменён";
+    stop
+  else (Нет)
+  endif
+
+  |⚙️ MRP Service|
+  :Выбор материала;
+  :retry_count = 0;
+
+  repeat
+    |⚙️ MRP Service|
+    :GET /api/wms/stock/{id}\n(timeout 5 сек);
+
+    |🏭 WMS Service|
+    :Получение запроса;
+    :Подключение к БД;
+
+    if (Соединение OK?) then (Нет)
+      |⚙️ MRP Service|
+      :retry_count++;
+      :Пауза = 2^retry_count секунд;
+
+      if (retry_count < 3?) then (Да)
+        :Повтор попытки;
+      else (Нет)
+        :available_qty = 0;
+      endif
+    else (Да)
+      |🏭 WMS Service|
+      :SELECT SUM(quantity);
+      :HTTP 200 OK;
+      |⚙️ MRP Service|
+      :success = true;
+    endif
+
+  repeat while (Есть ошибки И retry_count < 3) is (Да)
+  -> (Нет);
+
+  |⚙️ MRP Service|
+  :deficit = required - available;
+
+  if (deficit > 0?) then (Да)
+    :Расчёт order_date;
+
+    if (order_date < today?) then (Да)
+      :priority = HIGH;
+      :urgent_count++;
+    else (Нет)
+      :priority = MEDIUM;
+    endif
+
+    :Добавление в дефициты;
+  else (Нет)
+  endif
+
+repeat while (Есть материалы?) is (Да)
+-> (Нет);
+
+|⚙️ MRP Service|
+:Все материалы проверены;
+
+' ==================== СОХРАНЕНИЕ ====================
+:BEGIN TRANSACTION;
+:UPDATE mrp_calculations\nSET status='COMPLETED';
+
+if (UPDATE OK?) then (Нет)
+  :ROLLBACK;
+  |🔌 API Gateway|
+  :HTTP 500;
+  :Передача ответа;
+  |🖥️ Web Client|
+  :Показ ошибки;
+  stop
+else (Да)
+endif
+
+|⚙️ MRP Service|
+:COMMIT;
+
+:Подключение к MongoDB;
+
+if (Соединение OK?) then (Да)
+  :INSERT mrp_results;
+
+  repeat
+    |⚙️ MRP Service|
+    :INSERT mrp_result_items;
+  repeat while (Есть дефициты?) is (Да)
+  -> (Нет);
+else (Нет)
+endif
+
+' ==================== ПЛАН ЗАКУПОК ====================
+|⚙️ MRP Service|
+if (Есть дефициты?) then (Да)
+
+  :Группировка по поставщикам;
+
+  fork
+    |⚙️ MRP Service|
+    :procurement_success = false;
+    :retry_count = 0;
+
+    repeat
+      |⚙️ MRP Service|
+      :POST /api/procurement/requests\n(timeout 10 сек);
+
+      |🛒 Procurement Service|
+      :Получение запроса;
+
+      if (Соединение OK?) then (Нет)
+        |⚙️ MRP Service|
+        :retry_count++;
+        :Пауза = 2^retry_count секунд;
+
+        if (retry_count < 3?) then (Да)
+          :Повтор попытки;
+        else (Нет)
+          :procurement_success = false;
+        endif
+      else (Да)
+        |🛒 Procurement Service|
+        :BEGIN TRANSACTION;
+
+        repeat
+          |🛒 Procurement Service|
+          :INSERT purchase_requests;
+        repeat while (Есть заявки?) is (Да)
+        -> (Нет);
+
+        |🛒 Procurement Service|
+        :INSERT outbox_events;
+        :COMMIT;
+        :HTTP 201;
+        |⚙️ MRP Service|
+        :procurement_success = true;
+      endif
+
+    repeat while (Есть ошибки И retry_count < 3) is (Да)
+    -> (Нет);
+
+  fork again
+    |⚙️ MRP Service|
+    :suppliers_success = false;
+    :retry_count = 0;
+
+    repeat
+      |⚙️ MRP Service|
+      :GET /api/procurement/suppliers\n(timeout 5 сек);
+
+      |🛒 Procurement Service|
+      :Получение запроса;
+
+      if (Соединение OK?) then (Нет)
+        |⚙️ MRP Service|
+        :retry_count++;
+        :Пауза = 2^retry_count секунд;
+
+        if (retry_count < 3?) then (Да)
+          :Повтор попытки;
+        else (Нет)
+          :Использование кэша;
+        endif
+      else (Да)
+        |🛒 Procurement Service|
+        :SELECT suppliers;
+        :HTTP 200;
+        |⚙️ MRP Service|
+        :suppliers_success = true;
+      endif
+
+    repeat while (Есть ошибки И retry_count < 3) is (Да)
+    -> (Нет);
+
+  end fork
+
+  |⚙️ MRP Service|
+  if (procurement OK И suppliers OK?) then (Оба)
+    :status = COMPLETED;
+    :warnings = [];
+  else if (procurement OK?) then (Частично 1)
+    :status = COMPLETED_WITH_WARNINGS;
+    :warnings = ["Данные о поставщиках недоступны"];
+  else if (suppliers OK?) then (Частично 2)
+    :status = COMPLETED_WITH_WARNINGS;
+    :warnings = ["Заявки не созданы в Procurement"];
+  else (Оба failed)
+    :status = COMPLETED_WITH_ERRORS;
+    :errors = ["Сервисы недоступны"];
+  endif
+
+else (Нет)
+  :status = COMPLETED;
+  :warnings = [];
+endif
+
+' ==================== ОТВЕТ ====================
+|⚙️ MRP Service|
+:BEGIN TRANSACTION;
+:INSERT outbox_events;
+
+if (INSERT OK?) then (Да)
+  :COMMIT;
+else (Нет)
+  :ROLLBACK;
+endif
+
+|⚙️ MRP Service|
+:Формирование ответа;
+:HTTP 200 OK;
+
+|🔌 API Gateway|
+:Передача ответа;
+
+|🖥️ Web Client|
+:Получение Ответа;
+
+if (Статус 200?) then (Да)
+  :Показ: "Расчёт завершён";
+
+  if (есть предупреждения?) then (Да)
+    :Показ предупреждений;
+  else (Нет)
+  endif
+
+  if (есть дефицит материалов?) then (Да)
+    :Отображение дефицитов;
+    :Отображение плана закупок;
+
+    if (Нажал "Утвердить"?) then (Да)
+      :POST /api/procurement/approve;
+
+      |🔌 API Gateway|
+      :Валидация;
+      :Маршрутизация;
+
+      |⚙️ MRP Service|
+      :UPDATE SET status='APPROVED';
+      :HTTP 200;
+
+      |🖥️ Web Client|
+      :Показ: "План утверждён";
+    else (Нет)
+    endif
+  else (Нет)
+    :Показ: "Материалов достаточно";
+  endif
+
+else (Нет)
+  :Показ ошибки;
+endif
+
+stop
+
+' ==================== ОТМЕНА ====================
+floating note left: Отмена расчёта
+
+|🖥️ Web Client|
+start
+:Нажал "Отменить";
+:DELETE /api/mrp/calculate/{id};
+
+|🔌 API Gateway|
+:Валидация;
+:Маршрутизация;
+
+|⚙️ MRP Service|
+:UPDATE mrp_calculations\nSET cancellation_requested = true;
+:HTTP 202 Accepted;
+
+|🖥️ Web Client|
+:Показ: "Запрос на отмену отправлен";
+stop
+
+' ==================== OUTBOX WORKER ====================
+floating note right: Фоновый процесс
+
+|🔄 Outbox Worker|
+start
+
+repeat
+  |🔄 Outbox Worker|
+  :SELECT * FROM outbox_events\nWHERE processed_at IS NULL\nLIMIT 100;
+
+  if (Есть события?) then (Да)
+    repeat
+      |🔄 Outbox Worker|
+      :Десериализация;
+
+      if (event_type = completed?) then (Да)
+        fork
+          |🔄 Outbox Worker|
+          :POST /api/notifications/send;
+
+          if (Успешно?) then (Нет)
+            if (retry < 3?) then (Да)
+              :UPDATE next_retry_at;
+            else (Нет)
+              :Dead Letter Queue;
+            endif
+          else (Да)
+            :UPDATE processed_at;
+          endif
+        fork again
+          |🔄 Outbox Worker|
+          :POST /api/analytics/events;
+        end fork
+      else (Нет)
+      endif
+    repeat while (Есть ещё?) is (Да)
+    -> (Нет);
+  else (Нет)
+    |🔄 Outbox Worker|
+    :Пауза 2 сек;
+  endif
+repeat while (Worker активен?) is (Да)
+
+stop
+
+@enduml
