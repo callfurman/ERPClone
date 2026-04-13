@@ -1,0 +1,222 @@
+@startuml
+' Явно указываем, что это классовая диаграмма
+allowmixing
+
+skinparam backgroundColor #FFFFFF
+
+skinparam class {
+    BackgroundColor #E3F2FD
+    BorderColor #1976D2
+    FontColor #000000
+}
+
+skinparam actor {
+    BackgroundColor #FFCDD2
+    BorderColor #D32F2F
+}
+
+title Conceptual Model MRP/WMS
+
+actor Client
+actor Supplier
+actor User
+
+class CustomerOrder {
+  + ID
+  + Status
+  + Date
+  + Amount
+}
+
+class CustomerOrderItem {
+  + ID
+  + Quantity
+  + Price
+  + Deadline
+}
+
+class SupplierOrder {
+  + ID
+  + Status
+  + Date
+}
+
+class SupplierOrderItem {
+  + ID
+  + Quantity
+  + Price
+  + Deadline
+}
+
+class Nomenclature {
+  + ID
+  + Name
+  + Type
+}
+
+class BOM {
+  + ID
+  + Version
+  + Status
+  + Date
+}
+
+class BOMItem {
+  + ID
+  + ConsumptionRate
+  + LossPercent
+  + Sequence
+}
+
+class Unit {
+  + ID
+  + Code
+  + Name
+  + Coefficient
+}
+
+class Batch {
+  + ID
+  + BatchNumber
+  + ProductionDate
+  + ExpirationDate
+}
+
+class Reservation {
+  + ID
+  + Quantity
+  + Deadline
+}
+
+class Warehouse {
+  + ID
+  + Name
+  + Address
+}
+
+class StorageCell {
+  + ID
+  + Code
+  + Zone
+  + Type
+  + Capacity
+}
+
+class StockMovement {
+  + ID
+  + Quantity
+  + Date
+  + Document
+}
+
+class StockBalance {
+  + ID
+  + CurrentVolume
+  + Date
+}
+
+class ProductionPlan {
+  + ID
+  + StartDate
+  + EndDate
+  + Status
+}
+
+class ProductionPlanItem {
+  + ID
+  + PlannedVolume
+  + StartDate
+  + FinishDate
+}
+
+class ProductionOrder {
+  + ID
+  + OrderNumber
+  + PlannedQuantity
+  + Status
+}
+
+class MRPCalculation {
+  + ID
+  + CalculationDate
+  + Status
+}
+
+class PurchaseRequest {
+  + ID
+  + RequiredDate
+  + Priority
+}
+
+class Role {
+  + ID
+  + Name
+  + Description
+}
+
+class ReceiptDocument {
+  + ID
+  + Date
+}
+
+class ShipmentDocument {
+  + ID
+  + Date
+}
+
+class Inventory {
+  + ID
+  + Status
+  + Date
+}
+
+' --- Связи ---
+Client --> CustomerOrder : places
+Supplier --> SupplierOrder : receives
+User --> Role : has
+User --> ProductionPlan : approves
+User --> Inventory : conducts
+User --> MRPCalculation : executes
+
+CustomerOrder "1" -- "0..*" CustomerOrderItem : contains
+CustomerOrderItem "*" -- "1" Nomenclature : refers to
+CustomerOrderItem "*" -- "0..1" Reservation : reserves
+
+SupplierOrder "1" -- "0..*" SupplierOrderItem : contains
+SupplierOrderItem "*" -- "1" Nomenclature : refers to
+
+Nomenclature "1" -- "0..1" BOM : described by
+Nomenclature "*" -- "1" Unit : measured in
+Nomenclature "1" -- "0..*" Batch : has
+
+BOM "1" -- "0..*" BOMItem : consists of
+BOMItem "*" -- "1" Nomenclature : refers to
+
+Batch "1" -- "0..*" Reservation : blocks
+
+Warehouse "1" -- "0..*" StorageCell : contains
+StorageCell "1" -- "0..*" StockBalance : stores
+StorageCell "1" -- "0..*" StockMovement : registers
+
+StockMovement "*" -- "1" Nomenclature : changes balance
+StockMovement "*" -- "1" Batch : belongs to batch
+StockMovement "*" -- "0..1" ReceiptDocument : documented by receipt
+StockMovement "*" -- "0..1" ShipmentDocument : documented by shipment
+
+StockBalance "*" -- "1" Nomenclature : reflects balance
+StockBalance "*" -- "1" Batch : belongs to batch
+StockBalance "*" -- "0..1" Inventory : adjusted by
+
+ProductionPlan "1" -- "0..*" ProductionPlanItem : contains
+ProductionPlanItem "*" -- "1" Nomenclature : plans production
+ProductionPlanItem "1" -- "0..1" ProductionOrder : generates
+
+MRPCalculation "*" -- "1" ProductionPlan : analyzes
+MRPCalculation "1" -- "0..*" PurchaseRequest : generates
+PurchaseRequest "*" -- "1" Nomenclature : requests
+
+ReceiptDocument "*" -- "1" SupplierOrder : closes
+ShipmentDocument "*" -- "1" CustomerOrder : closes
+PurchaseRequest "*" -- "0..1" SupplierOrder : converts to
+
+@enduml
