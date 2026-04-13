@@ -1,0 +1,730 @@
+@startuml
+skinparam linetype ortho
+skinparam packageStyle rectangle
+skinparam backgroundColor #FFFFFF
+
+' Цветовая палитра для доменов
+skinparam package {
+    BackgroundColor #F5F5F5
+    BorderColor #CCCCCC
+    FontColor #333333
+    BorderThickness 2
+}
+skinparam class {
+    BackgroundColor White
+    BorderColor Black
+    ArrowColor Black
+}
+
+title ERP/WMS Database Schema - DDD Bounded Contexts
+
+' ============================================
+' 1. PRODUCT CATALOG (Номенклатура)
+' ============================================
+package "📦 Product Catalog (Номенклатура)" <<Rectangle>> {
+    
+    class units {
+        + id: UUID <<PK>>
+        --
+        code: VARCHAR(10) <<UK>>
+        name: VARCHAR(100)
+        conversion_factor: DECIMAL(10,6)
+        created_at: TIMESTAMPTZ
+    }
+
+    class nomenclature {
+        + id: UUID <<PK>>
+        --
+        sku: VARCHAR(50) <<UK>>
+        name: VARCHAR(200)
+        type: VARCHAR(20)
+        unit_id: UUID <<FK>>
+        barcode: VARCHAR(100)
+        is_active: BOOLEAN
+        created_at: TIMESTAMPTZ
+        updated_at: TIMESTAMPTZ
+    }
+
+    class products {
+        + id: UUID <<PK,FK>>
+        --
+        sales_price: DECIMAL(12,2)
+        weight: DECIMAL(10,3)
+        product_group: VARCHAR(100)
+    }
+
+    class materials {
+        + id: UUID <<PK,FK>>
+        --
+        cost_price: DECIMAL(12,2)
+        default_supplier_id: UUID <<FK>>
+        lead_time_days: INTEGER
+        reorder_point: DECIMAL(10,3)
+        safety_stock: DECIMAL(10,3)
+    }
+
+    class bom_specifications {
+        + id: UUID <<PK>>
+        --
+        product_id: UUID <<FK>>
+        version: VARCHAR(20)
+        valid_from: DATE
+        valid_to: DATE
+        is_active: BOOLEAN
+        created_at: TIMESTAMPTZ
+        --
+        <<UK>> (product_id, version)
+    }
+
+    class bom_items {
+        + id: UUID <<PK>>
+        --
+        bom_id: UUID <<FK>>
+        component_id: UUID <<FK>>
+        quantity: DECIMAL(10,3)
+        unit_id: UUID <<FK>>
+        loss_percent: DECIMAL(5,2)
+        sequence_number: INTEGER
+        --
+        <<UK>> (bom_id, component_id)
+    }
+}
+
+' ============================================
+' 2. INVENTORY / WMS (Склад)
+' ============================================
+package "🏭 Inventory / WMS (Склад)" <<Rectangle>> {
+
+    class warehouses {
+        + id: UUID <<PK>>
+        --
+        name: VARCHAR(200)
+        address: TEXT
+        type: VARCHAR(20)
+        is_active: BOOLEAN
+    }
+
+    class storage_cells {
+        + id: UUID <<PK>>
+        --
+        warehouse_id: UUID <<FK>>
+        cell_code: VARCHAR(50)
+        zone_type: VARCHAR(20)
+        capacity: DECIMAL(10,3)
+        --
+        <<UK>> (warehouse_id, cell_code)
+    }
+
+    class batches {
+        + id: UUID <<PK>>
+        --
+        batch_number: VARCHAR(50) <<UK>>
+        nomenclature_id: UUID <<FK>>
+        production_date: DATE
+        expiration_date: DATE
+        status: VARCHAR(20)
+        created_at: TIMESTAMPTZ
+    }
+
+    class stock_movements {
+        + id: UUID <<PK>>
+        --
+        movement_type: VARCHAR(20)
+        nomenclature_id: UUID <<FK>>
+        batch_id: UUID <<FK>>
+        warehouse_id: UUID <<FK>>
+        cell_id: UUID <<FK>>
+        quantity: DECIMAL(10,3)
+        document_type: VARCHAR(50)
+        document_id: UUID
+        created_by: UUID <<FK>>
+        created_at: TIMESTAMPTZ
+        notes: TEXT
+    }
+
+    class current_stock <<View>> {
+        nomenclature_id: UUID
+        batch_id: UUID
+        warehouse_id: UUID
+        cell_id: UUID
+        quantity: DECIMAL(10,3)
+    }
+
+    class inventories {
+        + id: UUID <<PK>>
+        --
+        warehouse_id: UUID <<FK>>
+        inventory_date: DATE
+        status: VARCHAR(20)
+        created_by: UUID <<FK>>
+        completed_at: TIMESTAMPTZ
+        notes: TEXT
+    }
+
+    class inventory_items {
+        + id: UUID <<PK>>
+        --
+        inventory_id: UUID <<FK>>
+        nomenclature_id: UUID <<FK>>
+        batch_id: UUID <<FK>>
+        book_quantity: DECIMAL(10,3)
+        actual_quantity: DECIMAL(10,3)
+        variance: DECIMAL(10,3)
+        cell_id: UUID <<FK>>
+    }
+
+    class warehouse_tasks {
+        + id: UUID <<PK>>
+        --
+        task_type: VARCHAR(20)
+        warehouse_id: UUID <<FK>>
+        priority: INTEGER
+        status: VARCHAR(20)
+        assigned_to: UUID <<FK>>
+        assigned_at: TIMESTAMPTZ
+        completed_at: TIMESTAMPTZ
+        created_at: TIMESTAMPTZ
+    }
+
+    class warehouse_route_points {
+        + id: UUID <<PK>>
+        --
+        task_id: UUID <<FK>>
+        sequence_number: INTEGER
+        cell_id: UUID <<FK>>
+        action_type: VARCHAR(20)
+        estimated_distance: INTEGER
+    }
+}
+
+' ============================================
+' 3. PRODUCTION & MRP (Производство)
+' ============================================
+package "⚙️ Production & MRP (Производство)" <<Rectangle>> {
+
+    class production_plans {
+        + id: UUID <<PK>>
+        --
+        plan_number: VARCHAR(50) <<UK>>
+        period_start: DATE
+        period_end: DATE
+        status: VARCHAR(20)
+        created_by: UUID <<FK>>
+        created_at: TIMESTAMPTZ
+        approved_at: TIMESTAMPTZ
+    }
+
+    class mrp_profiles {
+        + id: UUID <<PK>>
+        --
+        name: VARCHAR(100) <<UK>>
+        safety_stock_days: INTEGER
+        include_safety_stock: BOOLEAN
+        planning_horizon_days: INTEGER
+        is_default: BOOLEAN
+        created_by: UUID <<FK>>
+        created_at: TIMESTAMPTZ
+    }
+
+    class mrp_calculations {
+        + id: UUID <<PK>>
+        --
+        plan_id: UUID <<FK>>
+        calculated_at: TIMESTAMPTZ
+        horizon_days: INTEGER
+        status: VARCHAR(20)
+        total_materials: INTEGER
+        total_deficit: DECIMAL(12,2)
+        urgent_count: INTEGER
+        has_errors: BOOLEAN
+        calculated_by: UUID <<FK>>
+        mongodb_document_id: VARCHAR(24)
+    }
+
+    class production_orders {
+        + id: UUID <<PK>>
+        --
+        order_number: VARCHAR(50) <<UK>>
+        plan_id: UUID <<FK>>
+        mrp_calculation_id: UUID <<FK>>
+        product_id: UUID <<FK>>
+        planned_quantity: DECIMAL(10,3)
+        produced_quantity: DECIMAL(10,3)
+        start_date: DATE
+        end_date: DATE
+        status: VARCHAR(20)
+        created_at: TIMESTAMPTZ
+    }
+
+    class production_order_items {
+        + id: UUID <<PK>>
+        --
+        production_order_id: UUID <<FK>>
+        nomenclature_id: UUID <<FK>>
+        planned_qty: DECIMAL(10,3)
+        produced_qty: DECIMAL(10,3)
+        scrap_qty: DECIMAL(10,3)
+        unit_id: UUID <<FK>>
+    }
+
+    class work_centers {
+        + id: UUID <<PK>>
+        --
+        name: VARCHAR(100)
+        warehouse_id: UUID <<FK>>
+        capacity_per_shift: DECIMAL(10,2)
+        is_active: BOOLEAN
+    }
+
+    class production_operations {
+        + id: UUID <<PK>>
+        --
+        production_order_id: UUID <<FK>>
+        operation_name: VARCHAR(100)
+        sequence_number: INTEGER
+        work_center_id: UUID <<FK>>
+        planned_duration_minutes: INTEGER
+        actual_duration_minutes: INTEGER
+        started_at: TIMESTAMPTZ
+        completed_at: TIMESTAMPTZ
+        status: VARCHAR(20)
+    }
+}
+
+' ============================================
+' 4. PROCUREMENT (Закупки)
+' ============================================
+package "🛒 Procurement (Закупки)" <<Rectangle>> {
+
+    class suppliers {
+        + id: UUID <<PK>>
+        --
+        name: VARCHAR(200)
+        inn: VARCHAR(20)
+        contact_email: VARCHAR(200)
+        contact_phone: VARCHAR(50)
+        rating: INTEGER
+        lead_time_days: INTEGER
+        is_active: BOOLEAN
+        created_at: TIMESTAMPTZ
+    }
+
+    class purchase_requests {
+        + id: UUID <<PK>>
+        --
+        mrp_calculation_id: UUID <<FK>>
+        material_id: UUID <<FK>>
+        required_qty: DECIMAL(10,3)
+        required_date: DATE
+        priority: VARCHAR(10)
+        status: VARCHAR(20)
+        created_at: TIMESTAMPTZ
+    }
+
+    class purchase_orders {
+        + id: UUID <<PK>>
+        --
+        order_number: VARCHAR(50) <<UK>>
+        supplier_id: UUID <<FK>>
+        order_date: DATE
+        expected_delivery: DATE
+        total_amount: DECIMAL(14,2)
+        status: VARCHAR(20)
+        created_by: UUID <<FK>>
+        created_at: TIMESTAMPTZ
+    }
+
+    class purchase_order_items {
+        + id: UUID <<PK>>
+        --
+        purchase_order_id: UUID <<FK>>
+        material_id: UUID <<FK>>
+        quantity: DECIMAL(10,3)
+        unit_price: DECIMAL(12,2)
+        total_price: DECIMAL(14,2)
+        expected_date: DATE
+        received_qty: DECIMAL(10,3)
+    }
+
+    class receipts {
+        + id: UUID <<PK>>
+        --
+        receipt_number: VARCHAR(50) <<UK>>
+        purchase_order_id: UUID <<FK>>
+        received_date: TIMESTAMPTZ
+        supplier_id: UUID <<FK>>
+        status: VARCHAR(20)
+        qc_status: VARCHAR(20)
+        qc_completed_at: TIMESTAMPTZ
+        received_by: UUID <<FK>>
+        inspected_by: UUID <<FK>>
+    }
+
+    class quality_inspections {
+        + id: UUID <<PK>>
+        --
+        receipt_id: UUID <<FK>>
+        purchase_order_id: UUID <<FK>>
+        supplier_id: UUID <<FK>>
+        inspection_date: TIMESTAMPTZ
+        status: VARCHAR(20)
+        total_qty_received: DECIMAL(10,3)
+        total_qty_rejected: DECIMAL(10,3)
+        accepted_qty: DECIMAL(10,3)
+        inspector_id: UUID <<FK>>
+        created_at: TIMESTAMPTZ
+    }
+
+    class qc_results {
+        + id: UUID <<PK>>
+        --
+        receipt_id: UUID <<FK>>
+        test_name: VARCHAR(100)
+        test_value: VARCHAR(255)
+        expected_value: VARCHAR(255)
+        passed: BOOLEAN
+        tested_at: TIMESTAMPTZ
+    }
+}
+
+' ============================================
+' 5. SALES (Продажи)
+' ============================================
+package "💰 Sales (Продажи)" <<Rectangle>> {
+
+    class customers {
+        + id: UUID <<PK>>
+        --
+        name: VARCHAR(200)
+        inn: VARCHAR(20)
+        contact_email: VARCHAR(200)
+        contact_phone: VARCHAR(50)
+        category: VARCHAR(50)
+        credit_limit: DECIMAL(14,2)
+        is_active: BOOLEAN
+        created_at: TIMESTAMPTZ
+    }
+
+    class sales_orders {
+        + id: UUID <<PK>>
+        --
+        order_number: VARCHAR(50) <<UK>>
+        customer_id: UUID <<FK>>
+        order_date: DATE
+        delivery_date: DATE
+        total_amount: DECIMAL(14,2)
+        status: VARCHAR(20)
+        created_by: UUID <<FK>>
+        created_at: TIMESTAMPTZ
+    }
+
+    class sales_order_items {
+        + id: UUID <<PK>>
+        --
+        sales_order_id: UUID <<FK>>
+        nomenclature_id: UUID <<FK>>
+        quantity: DECIMAL(10,3)
+        unit_price: DECIMAL(12,2)
+        total_price: DECIMAL(14,2)
+        reserved_qty: DECIMAL(10,3)
+        shipped_qty: DECIMAL(10,3)
+    }
+
+    class shipments {
+        + id: UUID <<PK>>
+        --
+        shipment_number: VARCHAR(50) <<UK>>
+        sales_order_id: UUID <<FK>>
+        shipped_date: TIMESTAMPTZ
+        customer_id: UUID <<FK>>
+        status: VARCHAR(20)
+        carrier: VARCHAR(100)
+        tracking_number: VARCHAR(100)
+        shipped_by: UUID <<FK>>
+    }
+
+    class invoices {
+        + id: UUID <<PK>>
+        --
+        invoice_number: VARCHAR(50) <<UK>>
+        sales_order_id: UUID <<FK>>
+        issue_date: DATE
+        due_date: DATE
+        total_amount: DECIMAL(14,2)
+        paid_amount: DECIMAL(14,2)
+        status: VARCHAR(20)
+        created_at: TIMESTAMPTZ
+    }
+}
+
+' ============================================
+' 6. HR & RESOURCES (Кадры)
+' ============================================
+package "👥 HR & Resources (Кадры)" <<Rectangle>> {
+
+    class positions {
+        + id: UUID <<PK>>
+        --
+        name: VARCHAR(100) <<UK>>
+        department: VARCHAR(100)
+        default_role_id: UUID <<FK>>
+        hourly_rate: DECIMAL(10,2)
+        is_active: BOOLEAN
+    }
+
+    class employees {
+        + id: UUID <<PK>>
+        --
+        user_id: UUID <<FK>>
+        first_name: VARCHAR(100)
+        last_name: VARCHAR(100)
+        position_id: UUID <<FK>>
+        work_center_id: UUID <<FK>>
+        hire_date: DATE
+        is_active: BOOLEAN
+        created_at: TIMESTAMPTZ
+    }
+
+    class shifts {
+        + id: UUID <<PK>>
+        --
+        employee_id: UUID <<FK>>
+        work_center_id: UUID <<FK>>
+        shift_date: DATE
+        start_time: TIME
+        end_time: TIME
+        planned_hours: DECIMAL(4,2)
+        actual_hours: DECIMAL(4,2)
+        status: VARCHAR(20)
+    }
+
+    class timesheets {
+        + id: UUID <<PK>>
+        --
+        employee_id: UUID <<FK>>
+        shift_id: UUID <<FK>>
+        work_date: DATE
+        work_type: VARCHAR(20)
+        hours: DECIMAL(4,2)
+        production_order_id: UUID <<FK>>
+        output_qty: DECIMAL(10,3)
+        notes: TEXT
+        created_at: TIMESTAMPTZ
+    }
+}
+
+' ============================================
+' 7. IDENTITY (Безопасность)
+' ============================================
+package "🔐 Identity (Безопасность)" <<Rectangle>> {
+
+    class users {
+        + id: UUID <<PK>>
+        --
+        login: VARCHAR(100) <<UK>>
+        password_hash: VARCHAR(255)
+        is_active: BOOLEAN
+        last_login_at: TIMESTAMPTZ
+        created_at: TIMESTAMPTZ
+    }
+
+    class roles {
+        + id: UUID <<PK>>
+        --
+        name: VARCHAR(100) <<UK>>
+        description: TEXT
+        created_at: TIMESTAMPTZ
+    }
+
+    class permissions {
+        + id: UUID <<PK>>
+        --
+        module: VARCHAR(100)
+        action: VARCHAR(20)
+        description: TEXT
+        created_at: TIMESTAMPTZ
+    }
+
+    class user_roles {
+        + user_id: UUID <<PK,FK>>
+        + role_id: UUID <<PK,FK>>
+        --
+        assigned_at: TIMESTAMPTZ
+    }
+
+    class role_permissions {
+        + role_id: UUID <<PK,FK>>
+        + permission_id: UUID <<PK,FK>>
+    }
+}
+
+' ============================================
+' 8. FINANCE (Финансы)
+' ============================================
+package "💵 Finance (Финансы)" <<Rectangle>> {
+
+    class cost_items {
+        + id: UUID <<PK>>
+        --
+        code: VARCHAR(20) <<UK>>
+        name: VARCHAR(100)
+        type: VARCHAR(20)
+        is_active: BOOLEAN
+    }
+
+    class batch_costs {
+        + id: UUID <<PK>>
+        --
+        batch_id: UUID <<FK>>
+        cost_item_id: UUID <<FK>>
+        amount: DECIMAL(14,2)
+        currency: VARCHAR(3)
+        recorded_at: TIMESTAMPTZ
+        notes: TEXT
+    }
+
+    class production_budgets {
+        + id: UUID <<PK>>
+        --
+        budget_number: VARCHAR(50) <<UK>>
+        period_start: DATE
+        period_end: DATE
+        cost_item_id: UUID <<FK>>
+        planned_amount: DECIMAL(14,2)
+        actual_amount: DECIMAL(14,2)
+        status: VARCHAR(20)
+        created_at: TIMESTAMPTZ
+    }
+}
+
+' ============================================
+' 9. TECHNICAL (Технические)
+' ============================================
+package "🔧 Technical (Системные)" <<Rectangle>> {
+
+    class attachments {
+        + id: UUID <<PK>>
+        --
+        entity_type: VARCHAR(50)
+        entity_id: UUID
+        file_name: VARCHAR(255)
+        file_path: VARCHAR(500)
+        file_type: VARCHAR(50)
+        file_size: INTEGER
+        uploaded_by: UUID <<FK>>
+        uploaded_at: TIMESTAMPTZ
+    }
+
+    class outbox_events {
+        + id: UUID <<PK>>
+        --
+        aggregate_type: VARCHAR(100)
+        aggregate_id: UUID
+        event_type: VARCHAR(100)
+        payload: TEXT
+        created_at: TIMESTAMPTZ
+        processed_at: TIMESTAMPTZ
+        last_error: TEXT
+        retry_count: INTEGER
+        max_retries: INTEGER
+        next_retry_at: TIMESTAMPTZ
+    }
+}
+
+' ============================================
+' RELATIONSHIPS (Связи)
+' ============================================
+
+' --- Security ---
+users "1" -- "0..*" user_roles
+roles "1" -- "0..*" user_roles
+roles "1" -- "0..*" role_permissions
+permissions "1" -- "0..*" role_permissions
+roles "1" -- "0..*" positions : default_role_id
+
+' --- Catalog ---
+nomenclature "1" -- "0..1" products
+nomenclature "1" -- "0..1" materials
+nomenclature "1" -- "0..*" batches
+units "1" -- "0..*" nomenclature
+products "1" -- "0..*" bom_specifications
+bom_specifications "1" -- "0..*" bom_items
+materials "1" -- "0..*" bom_items : component_id
+
+' --- WMS ---
+warehouses "1" -- "0..*" storage_cells
+warehouses "1" -- "0..*" stock_movements
+warehouses "1" -- "0..*" inventories
+warehouses "1" -- "0..*" warehouse_tasks
+nomenclature "1" -- "0..*" stock_movements
+batches "1" -- "0..*" stock_movements
+storage_cells "1" -- "0..*" stock_movements
+inventories "1" -- "0..*" inventory_items
+nomenclature "1" -- "0..*" inventory_items
+warehouse_tasks "1" -- "0..*" warehouse_route_points
+storage_cells "1" -- "0..*" warehouse_route_points
+
+' --- Production ---
+production_plans "1" -- "0..*" mrp_calculations
+production_plans "1" -- "0..*" production_orders
+mrp_profiles "1" -- "0..*" mrp_calculations : (via logic)
+mrp_calculations "1" -- "0..*" production_orders
+mrp_calculations "1" -- "0..*" purchase_requests
+products "1" -- "0..*" production_orders
+production_orders "1" -- "0..*" production_order_items
+production_orders "1" -- "0..*" production_operations
+work_centers "1" -- "0..*" production_operations
+warehouses "1" -- "0..*" work_centers
+
+' --- Procurement ---
+suppliers "1" -- "0..*" materials : default_supplier_id
+suppliers "1" -- "0..*" purchase_orders
+suppliers "1" -- "0..*" receipts
+suppliers "1" -- "0..*" quality_inspections
+materials "1" -- "0..*" purchase_requests
+purchase_orders "1" -- "0..*" purchase_order_items
+purchase_orders "1" -- "0..*" receipts
+purchase_orders "1" -- "0..*" quality_inspections
+materials "1" -- "0..*" purchase_order_items
+receipts "1" -- "0..*" quality_inspections
+receipts "1" -- "0..*" qc_results
+
+' --- Sales ---
+customers "1" -- "0..*" sales_orders
+sales_orders "1" -- "0..*" sales_order_items
+sales_orders "1" -- "0..*" invoices
+sales_orders "1" -- "0..*" shipments
+nomenclature "1" -- "0..*" sales_order_items
+customers "1" -- "0..*" shipments
+
+' --- HR ---
+positions "1" -- "0..*" employees
+users "1" -- "0..1" employees
+work_centers "1" -- "0..*" employees
+employees "1" -- "0..*" shifts
+employees "1" -- "0..*" timesheets
+work_centers "1" -- "0..*" shifts
+shifts "1" -- "0..*" timesheets
+production_orders "1" -- "0..*" timesheets
+
+' --- Finance ---
+batches "1" -- "0..*" batch_costs
+cost_items "1" -- "0..*" batch_costs
+cost_items "1" -- "0..*" production_budgets
+
+' --- Users Audit ---
+users "1" -- "0..*" stock_movements : created_by
+users "1" -- "0..*" inventories : created_by
+users "1" -- "0..*" receipts : received_by
+users "1" -- "0..*" receipts : inspected_by
+users "1" -- "0..*" shipments : shipped_by
+users "1" -- "0..*" warehouse_tasks : assigned_to
+users "1" -- "0..*" production_plans : created_by
+users "1" -- "0..*" mrp_calculations : calculated_by
+users "1" -- "0..*" purchase_orders : created_by
+users "1" -- "0..*" sales_orders : created_by
+users "1" -- "0..*" quality_inspections : inspector_id
+users "1" -- "0..*" mrp_profiles : created_by
+users "1" -- "0..*" attachments : uploaded_by
+
+@enduml
