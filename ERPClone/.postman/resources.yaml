@@ -1,0 +1,7 @@
+# Use this workspace to collaborate
+workspace:
+  id: c9c4fc54-8430-4486-8f02-8b803eb7bf62
+
+localResources:
+  specs:
+    - ..\code\contract\BR-MRP-01.yaml

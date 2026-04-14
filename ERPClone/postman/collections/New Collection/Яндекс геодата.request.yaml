@@ -1,0 +1,9 @@
+$kind: http-request
+url: https://geocode-maps.yandex.ru/1.x/?apikey=d37508f3-92a4-4cea-b79d-ab0f49fae08e&geocode=55.753544,
+  37.621202&format=json
+method: GET
+queryParams:
+  apikey: d37508f3-92a4-4cea-b79d-ab0f49fae08e
+  geocode: 55.753544, 37.621202
+  format: json
+order: 1776157380074

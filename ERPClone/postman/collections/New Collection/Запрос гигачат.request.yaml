@@ -1,0 +1,53 @@
+$kind: http-request
+name: Запрос гигачат
+url: https://gigachat.devices.sberbank.ru/api/v1/chat/completions
+method: POST
+headers:
+  Authorization: Bearer
+    eyJjdHkiOiJqd3QiLCJlbmMiOiJBMjU2Q0JDLUhTNTEyIiwiYWxnIjoiUlNBLU9BRVAtMjU2In0.IGIeHVdx6qXB7arB2qGarSBTYZcRTrf5-XnND6VSz04VfAjbLOkb92QKwxMAr-gZaN-s_NTtm2SDDzEdA24ZcnBRWjrYWDKabaamw_p2FMFAvZH8Z3EDJbNQKpKhqXj8_ae3VWmLk9nNfsubuVhmb8T80XUoPQrvzHm67R_RY5CMfPO_Pz7ODvXgFmCTETnlszfGAd7DA4oxOUmZ6xL9v0JVoa9nWB_neteSMIgLFiXgHkUl3uLtgqVsXwWFJWNFrsBn-TFUCRwDJJogENu9VbeDY6Fxrl0CI-a-ZJcA0r1q4svVKdsIHfh6a9oIQsNYsZreURZ3Va3LawqtCs3w4g.8_oJpP35dcWsjwCWawCKaA.2hz0DhXPTmB5Jgm0OqLXjjo1ezi2h2lPOn18kU3wpY1HccxU2-Kehf53xaxxn0UtbYiPB4ngFCS3j_7FN-klzFGjOIfn7qaE8Ig5qexpyV9ss78lRG0YzAFtGcM8dzvgy720YCofVbiu6iXU4mBQwZ9aWTM3vrRHbQn0cE-10A6RvTbiKbDs8GskYlf0MbiqIEcaicb1l-y-1rC3OQo8_XDBbyrlyxKnnQLt4OOL_lme1pAoAb9-vgv5pDu_9G_TI9HGqr8oF7DNYnEhwTG5RXZDQWPMWZyFNwpdLQ7PAZu2YBkqxYWKlKsr2x0EO9XTDEYPtlFUrHpO_puxzlIcryD_qK5mY4beG4BEGkS4lklAlDQlhS1tEHBNgRdCXZyOJP6UsmJTLSvyhinbztoyfqhjhR1M_HX80mrUfNOJusEtda5yN0OfaVg5K4JPjIw3gLueseohAsoYgsNy9tgG87qFgkXHpFN3sxdge3fkGNqFxrmXGOYcy5ZPDkJOz0mtwp1LcdLXMreSTZ4DzNQ3wfRgyPnveJQ1xu636pyXURrqntW_g-0QEUonYxFryRanVCw4QIKg1fR0N5CRzNzl7FOccCRVU2DqTonCi4ymiSxwOoMNQOxgjVwXF6IG_63VpZZQsEZ50RcbtWkA9RchwiNZBsrwBDWJNohKKS6wxyk_Y1M4NnlquUZdGlHFT12ORZ5qpML-AVz2xy4IXkQb-IXCc5uOk9GTvRsFyV6vl08.2GOrFl4vcepZoijqwCcfsu8EzhqkQ9XE876BJT8OGmc
+  Content-Type: application/json
+  Accept: application/json
+body:
+  type: json
+  content: "{\r
+
+    \  \"model\": \"GigaChat\",\r
+
+    \  \"messages\": [\r
+
+    \    {\r
+
+    \      \"role\": \"system\",\r
+
+    \      \"content\": \"Ты — геоинформационный ассистент. Возвращай результат
+    СТРОГО в формате JSON-массива объектов. Каждый объект: {\\\"address\\\":
+    \\\"исходный адрес\\\", \\\"lat\\\": число, \\\"lon\\\": число}. Не добавляй
+    текст, markdown или пояснения. Координаты в десятичных градусах. Если адрес
+    не найден — lat и lon = null.\"\r
+
+    \    },\r
+
+    \    {\r
+
+    \      \"role\": \"user\",\r
+
+    \      \"content\": \"Найди координаты для адресов:\\n1. 109012, г. Москва,
+    Красная площадь, д. 1\\n2. 125009, г. Москва, Тверская ул., д. 7\\n3.
+    101000, г. Москва, ул. Мясницкая, д. 26\\n4. 119019, г. Москва, ул. Арбат,
+    д. 51\\n5. 127006, г. Москва, ул. Новый Арбат, д. 15\\n6. 115035, г. Москва,
+    ул. Пятницкая, д. 62\\n7. 107031, г. Москва, Кузнецкий Мост ул., д.
+    21/5\\n8. 123001, г. Москва, ул. 1905 года, д. 8\\n9. 119121, г. Москва,
+    Ленинский проспект, д. 32А\\n10. 129090, г. Москва, проспект Мира, д. 41\"\r
+
+    \    }\r
+
+    \  ],\r
+
+    \  \"temperature\": 0.1,\r
+
+    \  \"max_tokens\": 3000\r
+
+    }"
+auth:
+  type: noauth
+order: 4347828277785725
