@@ -41,7 +41,8 @@ env/
 *.swp
 *.swo
 
-# 🔐 СЕКРЕТЫ (никогда не коммитьте!)
+
+
 .env
 .env.local
 .env.production
@@ -49,13 +50,7 @@ env/
 secrets.json
 config_secret.py
 
-# Postman
-postman_environment.json
-postman_globals.json
 
-# CSV результаты (если не нужны в репо)
-# results/*.csv
-*.csv
 
 # Logs
 *.log
