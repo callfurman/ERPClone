@@ -8,3 +8,54 @@ trash/*
 *.tmp
 .DS_Store
 node_modules/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 🔐 СЕКРЕТЫ (никогда не коммитьте!)
+.env
+.env.local
+.env.production
+*.key
+secrets.json
+config_secret.py
+
+# Postman
+postman_environment.json
+postman_globals.json
+
+# CSV результаты (если не нужны в репо)
+# results/*.csv
+*.csv
+
+# Logs
+*.log

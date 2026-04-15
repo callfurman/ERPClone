@@ -5,3 +5,13 @@ workspace:
 localResources:
   specs:
     - ..\code\contract\BR-MRP-01.yaml
+
+# Each entry here maps a local resource to one or more corresponding objects in Postman Cloud
+
+cloudResources:
+  environments:
+    ..\postman\environments\Geocode Project.yaml: 996e840d-5a0f-50ef-9c07-45717a8e2ccd
+  specs:
+    ..\code\contract\BR-MRP-01.yaml: d82b0b04-9746-46f7-9152-bac660b21583
+  collections:
+    ..\postman\collections\New Collection: 53983616-04e2800f-3910-4251-962e-7cf6e118cced
